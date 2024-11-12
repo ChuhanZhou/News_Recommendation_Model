@@ -8,6 +8,8 @@ import datetime
 import numpy as np
 import math
 import pickle
+import os
+from tqdm import tqdm
 
 def load_word2vec_data(file_path=run_config['word2vec_data']):
     print("[{}] loading document vector dataset from {}".format(datetime.datetime.now(), file_path))
@@ -21,28 +23,36 @@ def load_word2vec_data(file_path=run_config['word2vec_data']):
         article_vector_data[article_id] = article_vector
     return article_vector_data
 
-def load_dataset(folder_path,type_i=2):
+def load_dataset(folder_path,type_i=2,subvolume_num=0):
     type_list = ["train","validation","test"]
     path = "{}/{}".format(folder_path,type_list[type_i])
     print("[{}] loading {} dataset from {}".format(datetime.datetime.now(),type_list[type_i],path))
 
-    articles_file = pq.ParquetFile("{}/articles.parquet".format(folder_path))
-    articles_data = articles_file.read().to_pandas()
+    articles_data = pq.ParquetFile("{}/articles.parquet".format(folder_path)).read().to_pandas()
+    history_data = pq.ParquetFile("{}/history.parquet".format(path)).read().to_pandas()
+    behaviors_data = pq.ParquetFile("{}/behaviors.parquet".format(path)).read().to_pandas()
 
-    history_file = pq.ParquetFile("{}/history.parquet".format(path))
-    history_data = history_file.read().to_pandas()
-    behaviors_file = pq.ParquetFile("{}/behaviors.parquet".format(path))
-    behaviors_data = behaviors_file.read().to_pandas()
-
+    # save memory
     article_data = process_articles_data(articles_data)
+    articles_data = None
+    print("[{}] articles data processing finished".format(datetime.datetime.now()))
     user_history_data = process_history_data(history_data)
+    history_data = None
+    print("[{}] history data processing finished".format(datetime.datetime.now()))
     train_part_data,test_part_data,validation_part_data = process_behaviors_data(behaviors_data,type_i)
+    behaviors_data = None
+    print("[{}] behaviors data processing finished".format(datetime.datetime.now()))
 
     print("[{}] start building {} data".format(datetime.datetime.now(),type_list[type_i]))
     processed_data = []
     category_feature_data = {}
     news_info_data = {}
+
+    subvolume_path_list = []
+
     if type_i == 0:
+        progress_bar = tqdm(total=len(train_part_data))
+
         for user_i,user_id in enumerate(train_part_data.keys()):
             user_behavior_list = train_part_data[user_id]
             for behavior in user_behavior_list:
@@ -58,7 +68,7 @@ def load_dataset(folder_path,type_i=2):
 
                 #choose history training data
                 train_history_feature_list = []
-                #change user_history_list to do Data Augmentation
+                #change user_history_list to do Data Augmentation here
                 user_history_list = user_history_data[user_id].copy()
                 user_history_list.reverse()
 
@@ -81,13 +91,26 @@ def load_dataset(folder_path,type_i=2):
                         train_history_feature_list.append(np.zeros(train_history_feature_list[-1].shape))
                 processed_data.append([train_history_feature_list,target_news_feature,label_feature])
 
-            #schedule log
-            if (user_i+1)%int(len(train_part_data)/10)==0 or user_i+1==len(train_part_data):
-                print("[{}] training data building: ({}/{})".format(datetime.datetime.now(),user_i+1,len(train_part_data)))
+            progress_bar.update(1)
+
+            #save memory
+            train_part_data[user_id] = None
+            user_history_data[user_id] = None
+            if subvolume_num>1 and ((user_i+1)%int(len(train_part_data)/subvolume_num)==0 or user_i+1==len(train_part_data)):
+                subvolume_path = "{}.subvolume{}".format(run_config['train_data_processed'],len(subvolume_path_list))
+                export_processed_data(processed_data, subvolume_path)
+                subvolume_path_list.append(subvolume_path)
+                processed_data = []
+
     elif type_i == 1:
         a=1
     elif type_i == 2:
         a=1
+
+    for subvolume_path in subvolume_path_list:
+        processed_data = import_processed_data(subvolume_path) + processed_data
+        os.remove(subvolume_path)
+
     return processed_data,category_feature_data,news_info_data
 
 def process_behaviors_data(data,type_i=2):
@@ -144,8 +167,6 @@ def process_behaviors_data(data,type_i=2):
                 train_data[user_id].append(user_behavior_np)
 
         test_data.append([user_id,impression_time,inview_list])
-
-
     return train_data,test_data,validation_data
 
 def process_articles_data(data):
@@ -244,7 +265,7 @@ def import_processed_data(path):
         file = open(path,"rb")
         data = pickle.load(file)
         file.close()
-        print("[{}] import data from {}".format(datetime.datetime.now(), path))
+        #print("[{}] import data from {}".format(datetime.datetime.now(), path))
         return data
     except EOFError:
         return None
@@ -253,7 +274,7 @@ def export_processed_data(data,path):
     file = open(path,"wb")
     pickle.dump(data,file)
     file.close()
-    print("[{}] export data to {}".format(datetime.datetime.now(),path))
+    #print("[{}] export data to {}".format(datetime.datetime.now(),path))
 
 def build_full_data():
     print()

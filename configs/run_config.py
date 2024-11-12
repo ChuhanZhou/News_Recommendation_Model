@@ -1,5 +1,3 @@
-import this
-
 import torch
 
 config = {

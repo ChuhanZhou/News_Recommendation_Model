@@ -18,7 +18,5 @@ def view_num_norm(view_num):
 
 def datetime_norm(datetime, standard_time):
     standard = model_config['datetime_normalize_length']
-    a = np.timedelta64(standard, 'D')
-    b = standard_time - datetime
     norm = (standard_time - datetime)/np.timedelta64(standard, 'D')
     return 1-max(0, min(norm, 1))

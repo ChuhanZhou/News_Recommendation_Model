@@ -19,11 +19,11 @@ class Net(nn.Module):
         self.attention = Attention_Net()
 
     def forward(self, x):
-        interest_x, impression_time, category_x,article_data,article_history,now
-        news_x = self.news_net(category_x,article_data,article_history)
-        interest_x = self.interest_net(interest_net)
-        impression_time_norm = normalization.datetime_norm(impression_time,now)
-        x = self.attention(interest_x,impression_time_norm，news_x)
+        #interest_x, impression_time, category_x,article_data,article_history,now
+        #news_x = self.news_net(category_x,article_data,article_history)
+        #interest_x = self.interest_net(interest_net)
+        #impression_time_norm = normalization.datetime_norm(impression_time,now)
+        #x = self.attention(interest_x,impression_time_norm，news_x)
         return x
 
     def loss(self, ):
