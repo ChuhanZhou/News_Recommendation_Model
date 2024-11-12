@@ -7,6 +7,7 @@ import pandas as pd
 import datetime
 import numpy as np
 import math
+import pickle
 
 def load_word2vec_data(file_path=run_config['word2vec_data']):
     print("[{}] loading document vector dataset from {}".format(datetime.datetime.now(), file_path))
@@ -35,8 +36,59 @@ def load_dataset(folder_path,type_i=2):
 
     article_data = process_articles_data(articles_data)
     user_history_data = process_history_data(history_data)
-    train_data,test_data,validation_data = process_behaviors_data(behaviors_data,type_i)
+    train_part_data,test_part_data,validation_part_data = process_behaviors_data(behaviors_data,type_i)
 
+    print("[{}] start building {} data".format(datetime.datetime.now(),type_list[type_i]))
+    processed_data = []
+    category_feature_data = {}
+    news_info_data = {}
+    if type_i == 0:
+        for user_i,user_id in enumerate(train_part_data.keys()):
+            user_behavior_list = train_part_data[user_id]
+            for behavior in user_behavior_list:
+                article_id,standard_time,interest0,interest1 = behavior
+                label_feature = np.array([interest0,interest1])
+
+                target_category,target_info,target_history = article_data[article_id]
+                target_time_norm = normalization.datetime_norm(target_history[0],standard_time)
+                target_news_feature = np.concatenate((np.array([target_time_norm]),target_history[1:4]), axis=0).astype(float)
+                target_news_feature = np.concatenate((np.array([article_id]),target_news_feature), axis=0)
+                category_feature_data[article_id] = target_category
+                news_info_data[article_id] = target_info
+
+                #choose history training data
+                train_history_feature_list = []
+                #change user_history_list to do Data Augmentation
+                user_history_list = user_history_data[user_id].copy()
+                user_history_list.reverse()
+
+                for history_i in range(model_config['history_max_length']):
+                    if history_i<len(user_history_list):
+                        user_history = user_history_list[history_i]
+                        history_time, history_news_id, history_interest0, history_interest1 = user_history
+                        history_time_norm = normalization.datetime_norm(history_time,standard_time)
+
+                        history_news_category, history_news_info, history_news_history = article_data[history_news_id]
+                        history_news_time_norm = normalization.datetime_norm(history_news_history[0], standard_time)
+                        history_news_feature = np.concatenate((np.array([history_news_time_norm]), history_news_history[1:4]),axis=0).astype(float)
+                        category_feature_data[history_news_id] = history_news_category
+                        news_info_data[history_news_id] = history_news_info
+
+                        train_history_feature = np.concatenate((np.array([history_interest0, history_interest1,history_time_norm]),history_news_feature),axis=0)
+                        train_history_feature = np.concatenate((np.array([history_news_id]), train_history_feature), axis=0)
+                        train_history_feature_list.append(train_history_feature)
+                    else:
+                        train_history_feature_list.append(np.zeros(train_history_feature_list[-1].shape))
+                processed_data.append([train_history_feature_list,target_news_feature,label_feature])
+
+            #schedule log
+            if (user_i+1)%int(len(train_part_data)/10)==0 or user_i+1==len(train_part_data):
+                print("[{}] training data building: ({}/{})".format(datetime.datetime.now(),user_i+1,len(train_part_data)))
+    elif type_i == 1:
+        a=1
+    elif type_i == 2:
+        a=1
+    return processed_data,category_feature_data,news_info_data
 
 def process_behaviors_data(data,type_i=2):
     user_id_data = list(data["user_id"])
@@ -83,17 +135,18 @@ def process_behaviors_data(data,type_i=2):
 
             if len(article_id_list)==1 and not math.isnan(read_time) and not math.isnan(scroll_percentage):
                 article_id = int(article_id_list[0])
-                read_time = normalization.read_time_norm(read_time)
-                scroll_percentage = scroll_percentage / 100
 
-                user_behavior_np = np.array([article_id, impression_time, read_time, scroll_percentage])
+                user_behavior_np = np.array([
+                    article_id,
+                    impression_time,
+                    normalization.read_time_norm(read_time),
+                    scroll_percentage/100])
                 train_data[user_id].append(user_behavior_np)
 
         test_data.append([user_id,impression_time,inview_list])
 
 
     return train_data,test_data,validation_data
-
 
 def process_articles_data(data):
     article_id_data = list(data["article_id"])
@@ -138,7 +191,7 @@ def process_articles_data(data):
 
         article_vector_np = article_vector_data[article_id]
 
-        article_np = np.concatenate((article_type_np, category_np, sentiment_np, article_vector_np), axis=0)
+        article_np = np.concatenate((article_type_np, sentiment_np, article_vector_np), axis=0)
 
         #history data
         if math.isnan(total_inviews):
@@ -154,7 +207,7 @@ def process_articles_data(data):
             normalization.view_num_norm(total_pageviews),
             normalization.total_read_time_norm(total_read_time)])
 
-        article_data[article_id] = [article_np,history_np]
+        article_data[article_id] = [category_np,article_np,history_np]
     return article_data
 
 def process_history_data(data):
@@ -175,10 +228,32 @@ def process_history_data(data):
 
         user_history_data[user_id] = []
         for t_i,impression_time in enumerate(impression_time_list):
-            #impression_time = impression_time
             scroll_percentage = float(scroll_percentage_list[t_i])
             article_id = int(article_id_list[t_i])
             read_time = float(read_time_list[t_i])
-            user_history_data[user_id].append([impression_time,article_id,scroll_percentage,read_time])
+            user_history_data[user_id].append([
+                impression_time,
+                article_id,
+                normalization.read_time_norm(read_time),
+                scroll_percentage/100])
 
     return user_history_data
+
+def import_processed_data(path):
+    try:
+        file = open(path,"rb")
+        data = pickle.load(file)
+        file.close()
+        print("[{}] import data from {}".format(datetime.datetime.now(), path))
+        return data
+    except EOFError:
+        return None
+
+def export_processed_data(data,path):
+    file = open(path,"wb")
+    pickle.dump(data,file)
+    file.close()
+    print("[{}] export data to {}".format(datetime.datetime.now(),path))
+
+def build_full_data():
+    print()
