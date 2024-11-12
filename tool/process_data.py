@@ -7,9 +7,13 @@ import pandas as pd
 import datetime
 import numpy as np
 import math
+
+import gzip
 import pickle
+import pickletools
 import os
 from tqdm import tqdm
+from multiprocessing import Manager,Process
 
 def load_word2vec_data(file_path=run_config['word2vec_data']):
     print("[{}] loading document vector dataset from {}".format(datetime.datetime.now(), file_path))
@@ -23,7 +27,7 @@ def load_word2vec_data(file_path=run_config['word2vec_data']):
         article_vector_data[article_id] = article_vector
     return article_vector_data
 
-def load_dataset(folder_path,type_i=2,subvolume_num=0):
+def load_dataset(folder_path,type_i=2,subvolume_item_num=30000):
     type_list = ["train","validation","test"]
     path = "{}/{}".format(folder_path,type_list[type_i])
     print("[{}] loading {} dataset from {}".format(datetime.datetime.now(),type_list[type_i],path))
@@ -39,7 +43,7 @@ def load_dataset(folder_path,type_i=2,subvolume_num=0):
     user_history_data = process_history_data(history_data)
     history_data = None
     print("[{}] history data processing finished".format(datetime.datetime.now()))
-    train_part_data,test_part_data,validation_part_data = process_behaviors_data(behaviors_data,type_i)
+    train_part_data, test_part_data, validation_part_data,process_num = process_behaviors_data(behaviors_data, type_i)
     behaviors_data = None
     print("[{}] behaviors data processing finished".format(datetime.datetime.now()))
 
@@ -49,9 +53,10 @@ def load_dataset(folder_path,type_i=2,subvolume_num=0):
     news_info_data = {}
 
     subvolume_path_list = []
+    subvolume_build_task = None
 
     if type_i == 0:
-        progress_bar = tqdm(total=len(train_part_data))
+        progress_bar = tqdm(total=process_num)
 
         for user_i,user_id in enumerate(train_part_data.keys()):
             user_behavior_list = train_part_data[user_id]
@@ -63,8 +68,9 @@ def load_dataset(folder_path,type_i=2,subvolume_num=0):
                 target_time_norm = normalization.datetime_norm(target_history[0],standard_time)
                 target_news_feature = np.concatenate((np.array([target_time_norm]),target_history[1:4]), axis=0).astype(float)
                 target_news_feature = np.concatenate((np.array([article_id]),target_news_feature), axis=0)
-                category_feature_data[article_id] = target_category
-                news_info_data[article_id] = target_info
+                if article_id not in category_feature_data.keys():
+                    category_feature_data[article_id] = target_category
+                    news_info_data[article_id] = target_info
 
                 #choose history training data
                 train_history_feature_list = []
@@ -81,8 +87,9 @@ def load_dataset(folder_path,type_i=2,subvolume_num=0):
                         history_news_category, history_news_info, history_news_history = article_data[history_news_id]
                         history_news_time_norm = normalization.datetime_norm(history_news_history[0], standard_time)
                         history_news_feature = np.concatenate((np.array([history_news_time_norm]), history_news_history[1:4]),axis=0).astype(float)
-                        category_feature_data[history_news_id] = history_news_category
-                        news_info_data[history_news_id] = history_news_info
+                        if history_news_id not in category_feature_data.keys():
+                            category_feature_data[history_news_id] = history_news_category
+                            news_info_data[history_news_id] = history_news_info
 
                         train_history_feature = np.concatenate((np.array([history_interest0, history_interest1,history_time_norm]),history_news_feature),axis=0)
                         train_history_feature = np.concatenate((np.array([history_news_id]), train_history_feature), axis=0)
@@ -90,26 +97,49 @@ def load_dataset(folder_path,type_i=2,subvolume_num=0):
                     else:
                         train_history_feature_list.append(np.zeros(train_history_feature_list[-1].shape))
                 processed_data.append([train_history_feature_list,target_news_feature,label_feature])
+                progress_bar.update(1)
 
-            progress_bar.update(1)
+                if len(processed_data) == subvolume_item_num:
+                    subvolume_path = "{}.subvolume{}".format(run_config['train_data_processed'],len(subvolume_path_list))
+                    next_task = Process(target=export_processed_data,args=[processed_data, subvolume_path])
+                    next_task.start()
+                    if subvolume_build_task is not None:
+                        subvolume_build_task.join()
+                        subvolume_build_task.close()
+                    subvolume_build_task = next_task
+                    subvolume_path_list.append(subvolume_path)
+                    processed_data = []
+
+            #progress_bar.update(1)
 
             #save memory
             train_part_data[user_id] = None
             user_history_data[user_id] = None
-            if subvolume_num>1 and ((user_i+1)%int(len(train_part_data)/subvolume_num)==0 or user_i+1==len(train_part_data)):
-                subvolume_path = "{}.subvolume{}".format(run_config['train_data_processed'],len(subvolume_path_list))
-                export_processed_data(processed_data, subvolume_path)
-                subvolume_path_list.append(subvolume_path)
-                processed_data = []
+            #if subvolume_num>1 and (user_i+1)%round(len(train_part_data)/subvolume_num)==0:
+            #    subvolume_path = "{}.subvolume{}".format(run_config['train_data_processed'],len(subvolume_path_list))
+            #    if subvolume_build_task is not None:
+            #        subvolume_build_task.join()
+            #        subvolume_build_task.close()
+            #    subvolume_build_task = Process(target=export_processed_data,args=[processed_data, subvolume_path])
+            #    subvolume_build_task.start()
+            #    #export_processed_data(processed_data, subvolume_path)
+            #    subvolume_path_list.append(subvolume_path)
+            #    processed_data = []
 
     elif type_i == 1:
         a=1
     elif type_i == 2:
         a=1
 
+    if subvolume_build_task is not None:
+        subvolume_build_task.join()
+        subvolume_build_task.close()
+    last_processed_data = processed_data
+    processed_data = []
     for subvolume_path in subvolume_path_list:
-        processed_data = import_processed_data(subvolume_path) + processed_data
+        processed_data += import_processed_data(subvolume_path)
         os.remove(subvolume_path)
+    processed_data += last_processed_data
 
     return processed_data,category_feature_data,news_info_data
 
@@ -121,6 +151,7 @@ def process_behaviors_data(data,type_i=2):
     train_data = {}
     test_data = []
     validation_data = []
+    total_num = 0
 
     if type_i != 2:
         next_article_id_data = list(data["article_ids_clicked"])
@@ -149,6 +180,7 @@ def process_behaviors_data(data,type_i=2):
 
                 user_behavior_np = np.array([article_id, impression_time, read_time, scroll_percentage])
                 train_data[user_id].append(user_behavior_np)
+                total_num += 1
 
             article_id_list = next_article_id_data[i]
             read_time = next_read_time_data[i]
@@ -165,9 +197,14 @@ def process_behaviors_data(data,type_i=2):
                     normalization.read_time_norm(read_time),
                     scroll_percentage/100])
                 train_data[user_id].append(user_behavior_np)
+                total_num += 1
 
         test_data.append([user_id,impression_time,inview_list])
-    return train_data,test_data,validation_data
+
+    if type_i != 0:
+        total_num = len(test_data)
+
+    return train_data,test_data,validation_data,total_num
 
 def process_articles_data(data):
     article_id_data = list(data["article_id"])
@@ -260,20 +297,35 @@ def process_history_data(data):
 
     return user_history_data
 
-def import_processed_data(path):
+def import_processed_data(path,is_zip=True):
     try:
-        file = open(path,"rb")
-        data = pickle.load(file)
+        if is_zip:
+            file = gzip.open(path, 'rb')
+            data = pickle.Unpickler(file).load()
+        else:
+            file = open(path,"rb")
+            data = pickle.load(file)
         file.close()
         #print("[{}] import data from {}".format(datetime.datetime.now(), path))
         return data
     except EOFError:
         return None
 
-def export_processed_data(data,path):
-    file = open(path,"wb")
-    pickle.dump(data,file)
+def export_processed_data(data,path,is_zip=True):
+    if is_zip:
+        file = gzip.open(path, "wb")
+        #file.write(pickletools.optimize(pickle.dumps(data)))
+        file.write(pickle.dumps(data))
+    else:
+        file = open(path, "wb")
+        p = pickle.Pickler(file)
+        p.fast = True
+        p.dump(data)
     file.close()
+
+    #file = open(path,"wb")
+    #pickle.dump(data,file,protocol=pickle.HIGHEST_PROTOCOL)
+    #file.close()
     #print("[{}] export data to {}".format(datetime.datetime.now(),path))
 
 def build_full_data():
