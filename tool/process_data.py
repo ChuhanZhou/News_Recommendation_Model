@@ -27,7 +27,27 @@ def load_word2vec_data(file_path=run_config['word2vec_data']):
         article_vector_data[article_id] = article_vector
     return article_vector_data
 
-def load_dataset(folder_path,type_i=2,subvolume_item_num=30000):
+def load_processed_dataset(head_file_path,load_data_number=-1):
+    [subvolume_num, total_data_number, category_feature_data, news_info_data] = import_processed_data(head_file_path)
+    if load_data_number<0:
+        load_data_number = total_data_number
+    else:
+        load_data_number = min(total_data_number,load_data_number)
+    print("[{}] start loading {} processed data from {}".format(datetime.datetime.now(),load_data_number,head_file_path))
+
+    processed_data = []
+    progress_bar = tqdm(total=load_data_number)
+    for i in range(subvolume_num):
+        subvolume_path = "{}.subvolume{}".format(head_file_path,i)
+        part_processed_data = import_processed_data(subvolume_path)
+        part_processed_data = part_processed_data[0:min(load_data_number-len(processed_data),len(part_processed_data))]
+        processed_data = processed_data + part_processed_data
+        progress_bar.update(len(part_processed_data))
+        if len(processed_data) >= load_data_number:
+            break
+    return processed_data,category_feature_data,news_info_data
+
+def process_dataset(folder_path,type_i=2,subvolume_item_num=30000):
     type_list = ["train","validation","test"]
     path = "{}/{}".format(folder_path,type_list[type_i])
     print("[{}] loading {} dataset from {}".format(datetime.datetime.now(),type_list[type_i],path))
@@ -52,11 +72,15 @@ def load_dataset(folder_path,type_i=2,subvolume_item_num=30000):
     category_feature_data = {}
     news_info_data = {}
 
+
+    head_file_path = None
+    head_build_task = None
     subvolume_path_list = []
     subvolume_build_task = None
+    progress_bar = tqdm(total=process_num)
 
     if type_i == 0:
-        progress_bar = tqdm(total=process_num)
+        head_file_path = run_config['train_data_processed']
 
         for user_i,user_id in enumerate(train_part_data.keys()):
             user_behavior_list = train_part_data[user_id]
@@ -100,7 +124,7 @@ def load_dataset(folder_path,type_i=2,subvolume_item_num=30000):
                 progress_bar.update(1)
 
                 if len(processed_data) == subvolume_item_num:
-                    subvolume_path = "{}.subvolume{}".format(run_config['train_data_processed'],len(subvolume_path_list))
+                    subvolume_path = "{}.subvolume{}".format(head_file_path,len(subvolume_path_list))
                     next_task = Process(target=export_processed_data,args=[processed_data, subvolume_path])
                     next_task.start()
                     if subvolume_build_task is not None:
@@ -109,39 +133,34 @@ def load_dataset(folder_path,type_i=2,subvolume_item_num=30000):
                     subvolume_build_task = next_task
                     subvolume_path_list.append(subvolume_path)
                     processed_data = []
-
-            #progress_bar.update(1)
+                    if head_build_task is not None:
+                        head_build_task.join()
+                        head_build_task.close()
+                    head_build_task = Process(target=export_processed_data, args=[[len(subvolume_path_list),len(subvolume_path_list)*subvolume_item_num,category_feature_data,news_info_data], head_file_path])
+                    head_build_task.start()
 
             #save memory
             train_part_data[user_id] = None
             user_history_data[user_id] = None
-            #if subvolume_num>1 and (user_i+1)%round(len(train_part_data)/subvolume_num)==0:
-            #    subvolume_path = "{}.subvolume{}".format(run_config['train_data_processed'],len(subvolume_path_list))
-            #    if subvolume_build_task is not None:
-            #        subvolume_build_task.join()
-            #        subvolume_build_task.close()
-            #    subvolume_build_task = Process(target=export_processed_data,args=[processed_data, subvolume_path])
-            #    subvolume_build_task.start()
-            #    #export_processed_data(processed_data, subvolume_path)
-            #    subvolume_path_list.append(subvolume_path)
-            #    processed_data = []
 
     elif type_i == 1:
         a=1
     elif type_i == 2:
         a=1
 
+    if head_build_task is not None:
+        head_build_task.join()
+        head_build_task.close()
     if subvolume_build_task is not None:
         subvolume_build_task.join()
         subvolume_build_task.close()
-    last_processed_data = processed_data
-    processed_data = []
-    for subvolume_path in subvolume_path_list:
-        processed_data += import_processed_data(subvolume_path)
-        os.remove(subvolume_path)
-    processed_data += last_processed_data
 
-    return processed_data,category_feature_data,news_info_data
+    subvolume_path = "{}.subvolume{}".format(head_file_path, len(subvolume_path_list))
+    export_processed_data(processed_data,subvolume_path)
+    subvolume_path_list.append(subvolume_path)
+    export_processed_data([len(subvolume_path_list),process_num,category_feature_data,news_info_data], head_file_path)
+
+    return head_file_path
 
 def process_behaviors_data(data,type_i=2):
     user_id_data = list(data["user_id"])
