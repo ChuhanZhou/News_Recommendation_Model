@@ -1,7 +1,7 @@
 import torch
 
 config = {
-  'category_lable_num': 3000,#[2,2975] total:294
+  'category_label_num': 3000,#[2,2975] total:294
   'sentiment_label_dict': {'Negative':0,'Neutral':1,'Positive':2},
   'article_type_dict': {
     'article_default': 0,
@@ -20,10 +20,10 @@ config = {
     'article_video_standalone': 13,
     'article_image_gallery': 14,
     'article_timeline': 15},
+  'news_vector':300,
 
-  'news_dim':3319,#[article_type(16), category(3000), sentiment(3), article_vector(300)]
-  'news_feature':128,
-  'history_max_length': 200,#line
+  'news_feature':64,
+  'history_max_length': 100,#line
 
   'datetime_normalize_length':365*4,#day
   'read_time_normalize_length':60,#min set_max:30min

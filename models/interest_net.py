@@ -6,17 +6,19 @@ import torch.nn.functional as F
 import cv2
 import numpy as np
 
-class Interest_Net(nn.Module):
-    def __init__(self,input_dim=2, hidden_dim=8):
+class InterestModel(nn.Module):
+    def __init__(self,hidden_dim):
         super().__init__()
-        self.layer0 = nn.Linear(input_dim, hidden_dim)
+        self.fc_0 = nn.Linear(2, hidden_dim)
         self.bn = nn.BatchNorm1d(hidden_dim)
-        self.out = nn.Linear(hidden_dim, 1)
+        self.fc_out = nn.Linear(hidden_dim, 1)
         self.relu = F.relu
+        self.sigmoid = F.sigmoid
 
     def forward(self, x):
-        x = self.layer0(x)
+        x = self.fc_0(x)
         x = self.bn(x)
         x = self.relu(x)
-        x = self.out_layer(x)
-        return x
+        out = self.fc_out(x)
+        out = self.sigmoid(out)
+        return out
