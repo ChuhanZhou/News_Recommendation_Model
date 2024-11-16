@@ -75,7 +75,7 @@ class HistoryModel(nn.Module):
     def loss(self,out,target,label,neg_list=[]):
         #euclidean_distance = torch.norm(out - target, dim=-1)
         #euclidean_loss = torch.mean(euclidean_distance ** 2)
-        interest_rate = (self.pearson_correlation_coefficient(out, target)+1)/2
+        interest_rate = self.get_interest_rate(out, target)
 
         interest_loss = (1 - interest_rate).mean()
         mse_loss = self.MSE_loss(interest_rate,label)
@@ -83,7 +83,7 @@ class HistoryModel(nn.Module):
         pos_out_list = []
         neg_out_list = []
         for neg_out in neg_list:
-            neg_interest_rate = (self.cos_sim(out, neg_out)+1)/2
+            neg_interest_rate = self.get_interest_rate(out, neg_out)
             pos_out_list.append(interest_rate)
             neg_out_list.append(neg_interest_rate)
         pos_out_list = torch.cat(pos_out_list,dim=0)#.view(-1)
