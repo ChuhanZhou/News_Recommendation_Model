@@ -21,12 +21,13 @@ config = {
     'article_image_gallery': 14,
     'article_timeline': 15},
   'news_vector':300,
+  'news_pca_vector':64,
 
   'news_feature':64,
-  'history_max_length': 100,#line
+  'history_max_length': 200,#line
 
   'datetime_normalize_length':365*4,#day
-  'read_time_normalize_length':60,#min set_max:30min
+  'read_time_normalize_length':45,#min set_max:30min
 
   'total_inview_normalize_length':1e9,#
 
