@@ -2,7 +2,7 @@ from configs.run_config import config as run_config
 from configs.model_config import config as model_config
 from tool import process_data
 from models.history_net import HistoryModel
-from tool.evaluation import auc_score,true_positive_rate
+from tool.evaluation import auc_score,list_auc_score,true_positive_rate
 
 import datetime
 import torch
@@ -18,33 +18,36 @@ def model_validation(model,validation_data,device=run_config['device']):
     validation_processed_data, _, _ = validation_data
 
     true_list = []
-    score_list = []
+    auc = 0
     prediction_list = model_test(model, validation_data,device)
     time.sleep(0.001)
     progress_bar = tqdm(desc="[{}] validating test result".format(datetime.datetime.now()),total=len(validation_processed_data))
     for data_i, processed_data in enumerate(validation_processed_data):
         _, _, label_id = processed_data
 
-        sorted_id, sorted_int = prediction_list[data_i]
+        sorted_id, sorted_score = prediction_list[data_i]
+
+        t_list = []
+        s_list = []
+        for id_i, id in enumerate(sorted_id):
+            sim = sorted_score[id_i]
+            if id == label_id:
+                t_list.append(1)
+            else:
+                t_list.append(0)
+            s_list.append((sim+1)/2)
+        auc += auc_score(t_list,s_list)
 
         if sorted_id[0] == label_id:
             true_list.append(1)
         else:
             true_list.append(0)
-        score_list.append((sorted_int[0] + 1) / 2)
-
-        #for id_i, id in enumerate(sorted_id):
-        #    sim = sorted_sim[id_i]
-        #    if id == label_id:
-        #        true_list.append(1)
-        #    else:
-        #        true_list.append(0)
-        #    score_list.append((sim+1)/2)
 
         progress_bar.update(1)
+
     progress_bar.close()
     time.sleep(0.001)
-    auc = auc_score(true_list,score_list)
+    auc = auc/len(validation_processed_data)
     tpr = true_positive_rate(true_list)
     return [auc,tpr]
 
@@ -57,12 +60,12 @@ def model_test(model,test_data,device=run_config['device']):
     progress_bar = tqdm(desc="[{}] reducing news data dimensions".format(datetime.datetime.now()),total=len(test_category_data))
     for news_id in test_category_data:
         x_category = torch.tensor(test_category_data[news_id]).view(1, model_config['category_label_num']).float().to(device)
-        x_data = torch.tensor(test_news_info_data[news_id]).view(1, len(model_config['article_type_dict']) + len(model_config['sentiment_label_dict']) + model_config['news_vector']).float().to(device)
+        x_data = torch.tensor(test_news_info_data[news_id]).view(1, len(model_config['article_type_dict']) + len(model_config['sentiment_label_dict']) + model_config['news_pca_vector']).float().to(device)
 
         x_category = model.news_net.category_net(x_category)
         x_data = torch.cat((x_category, x_data), dim=1)
         x_data = model.news_net.news_data_net(x_data)
-        news_data_dict[news_id] = x_data.view(model_config['news_feature']).to("cpu")
+        news_data_dict[news_id] = x_data.view(model.news_net.news_data_net.output_dim).to("cpu")
         progress_bar.update(1)
     progress_bar.close()
 
@@ -80,8 +83,8 @@ def model_test(model,test_data,device=run_config['device']):
         out_t = model.news_net.forward_on_data_feature(t_data.to(device), t_history.to(device))
 
         interest_rate = model.get_interest_rate(out_x.repeat(out_t.shape[0], 1), out_t).squeeze().tolist()
-        sorted_id, sorted_int = zip(*sorted(zip(inview_id_list, interest_rate), key=lambda x: x[1], reverse=True))
-        prediction_list.append([sorted_id, sorted_int])
+        sorted_id, sorted_score = zip(*sorted(zip(inview_id_list, interest_rate), key=lambda x: x[1], reverse=True))
+        prediction_list.append([sorted_id, sorted_score])
         progress_bar.update(1)
     progress_bar.close()
     return prediction_list
@@ -102,9 +105,10 @@ def build_test_running_data(history_feature_list, inview_news_history_list,news_
         timestamp = history_feature[3]
         news_history = history_feature[4:9]
 
-        news_data = torch.zeros((model_config['news_feature']))
         if news_id in news_data_dict:
             news_data = news_data_dict[news_id]
+        else:
+            news_data = torch.zeros(history_news_data[-1].shape)
 
         history_interest.append(torch.Tensor(interest))
         history_timestamp.append(torch.Tensor([timestamp]))
@@ -142,11 +146,12 @@ if __name__ == '__main__':
         #"./ckpt/ckpt_ebnerd_demo_epoch_4.pth",
         #"./ckpt/ckpt_ebnerd_demo_epoch_5.pth",
     ]
-    ckpt_test_list = ["./ckpt/ckpt_ebnerd_demo_epoch_0.pth"]
+    ckpt_test_list = ["./ckpt/ckpt_ebnerd_small_epoch_0.pth"]
     device = run_config['device']
     #device = "cpu"
 
-    validation_data = process_data.load_processed_dataset(run_config['validation_data_processed'],)
+    #validation_data = process_data.load_processed_dataset(run_config['validation_data_processed'])
+    validation_data = process_data.load_processed_dataset("./dataset/ebnerd_demo.validation")
 
     model = HistoryModel(model_config['news_feature'])
     print("[{}] device: {}".format(datetime.datetime.now(), device))
@@ -157,4 +162,7 @@ if __name__ == '__main__':
         model_ckpt = torch.load(ckpt_path, map_location=torch.device(device))
         model.load_state_dict(model_ckpt, strict=True)
         model.to(device)
+        i_0_0 = model.interest_net(torch.tensor([[0.0, 0.0]], device=device))
+        i_0_5 = model.interest_net(torch.tensor([[0.5, 0.5]], device=device))
+        i_1_1 = model.interest_net(torch.tensor([[1.0, 1.0]], device=device))
         print(model_validation(model,validation_data,device))

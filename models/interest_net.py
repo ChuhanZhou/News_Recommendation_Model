@@ -17,7 +17,6 @@ class InterestModel(nn.Module):
 
     def forward(self, x):
         x = self.fc_0(x)
-        x = self.bn(x)
         x = self.relu(x)
         out = self.fc_out(x)
         out = self.sigmoid(out)

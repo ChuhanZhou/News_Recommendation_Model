@@ -1,6 +1,6 @@
 from configs.model_config import config as model_config
 
-from models.attention_net import AttentionModel,MultiheadAttentionModel,MultiFeatureAttentionModel
+from models.attention_net import AttentionModel,MultiheadAttentionModel,MultiDimensionsAttentionModel
 from models.news_net import NewsModel
 from models.interest_net import InterestModel
 from tool import normalization
@@ -19,38 +19,45 @@ class HistoryModel(nn.Module):
         self.output_dim = output_dim
 
         self.news_net = NewsModel(output_dim)
-        self.interest_net = InterestModel(8)
-        self.attention = MultiFeatureAttentionModel(model_config['news_feature']+2,output_dim*4,output_dim*2)
+        self.interest_net = InterestModel(4)
+        self.mlp = nn.Sequential(
+            nn.Linear(model_config['news_feature']+2, model_config['news_feature']+2),
+            nn.BatchNorm1d(model_config['news_feature']+2),
+            nn.ReLU(),
+            nn.Linear(model_config['news_feature']+2, model_config['news_feature']),
+            nn.BatchNorm1d(model_config['news_feature']),
+            nn.ReLU(),
+        )
+        self.attention = MultiDimensionsAttentionModel(model_config['news_feature'],model_config['news_feature'],16,0.2)
         self.fc_out = nn.Sequential(
-            nn.Linear(output_dim*2, output_dim*4),
-            nn.BatchNorm1d(output_dim*4),
+            nn.Linear(model_config['news_feature'], model_config['news_feature']),
             nn.ReLU(),
-            nn.Linear(output_dim*4, output_dim*2),
-            nn.BatchNorm1d(output_dim*2),
-            nn.ReLU(),
-            nn.Linear(output_dim*2, output_dim),
+            nn.Linear(model_config['news_feature'], model_config['news_feature']),
         )
         self.MSE_loss = nn.MSELoss()
         self.MR_loss = nn.MarginRankingLoss(margin=1.0)
+        self.CE_loss = nn.CrossEntropyLoss()
 
     def forward(self,x_category,x_data,x_history,x_interest,x_time):
         history_len = model_config['history_max_length']
         x_news = self.news_net(x_category,x_data,x_history)
         x_interest = self.interest_net(x_interest)
-        x_user_feature = torch.cat((x_interest, x_time,x_news), dim=1)
-        x_user_feature = x_user_feature.view(int(x_user_feature.shape[0]/history_len), history_len, model_config['news_feature']+2)
+        x_user_feature = torch.cat((x_interest,x_time,x_news), dim=1)
+        x_user_feature = self.mlp(x_user_feature)
+        x_user_feature = x_user_feature.view(int(x_user_feature.shape[0]/history_len), history_len, -1)
         x_user_feature = self.attention(x_user_feature)
-        x_user_feature = self.fc_out(x_user_feature)
+        #x_user_feature = self.fc_out(x_user_feature)
         return x_user_feature
 
     def forward_on_data_feature(self,x_data,x_history,x_interest,x_time):
         history_len = model_config['history_max_length']
         x_news = self.news_net.forward_on_data_feature(x_data, x_history)
         x_interest = self.interest_net(x_interest)
-        x_user_feature = torch.cat((x_interest, x_time, x_news), dim=1)
-        x_user_feature = x_user_feature.view(int(x_user_feature.shape[0] / history_len), history_len, model_config['news_feature'] + 2)
+        x_user_feature = torch.cat((x_interest,x_time,x_news), dim=1)
+        x_user_feature = self.mlp(x_user_feature)
+        x_user_feature = x_user_feature.view(int(x_user_feature.shape[0] / history_len), history_len, -1)
         x_user_feature = self.attention(x_user_feature)
-        x_user_feature = self.fc_out(x_user_feature)
+        #x_user_feature = self.fc_out(x_user_feature)
         return x_user_feature
 
     def get_interest_rate(self,a,b):
@@ -73,8 +80,6 @@ class HistoryModel(nn.Module):
         return result.view(result.shape[0], 1)
 
     def loss(self,out,target,label,neg_list=[]):
-        #euclidean_distance = torch.norm(out - target, dim=-1)
-        #euclidean_loss = torch.mean(euclidean_distance ** 2)
         interest_rate = self.get_interest_rate(out, target)
 
         interest_loss = (1 - interest_rate).mean()
@@ -86,11 +91,29 @@ class HistoryModel(nn.Module):
             neg_interest_rate = self.get_interest_rate(out, neg_out)
             pos_out_list.append(interest_rate)
             neg_out_list.append(neg_interest_rate)
-        pos_out_list = torch.cat(pos_out_list,dim=0)#.view(-1)
-        neg_out_list = torch.cat(neg_out_list,dim=0)#.view(-1)
+        pos_out_list = torch.cat(pos_out_list,dim=0)
+        neg_out_list = torch.cat(neg_out_list,dim=0)
+
         y = torch.ones(pos_out_list.shape).to(pos_out_list.device)
 
         mr_loss = self.MR_loss(pos_out_list,neg_out_list,y)
 
-        loss = interest_loss + mr_loss + mse_loss
+        neg_loss = neg_out_list.mean()
+
+        loss = 1.5*mr_loss + 1.0*interest_loss + 1.0*mse_loss +2.0*neg_loss
         return loss
+
+    def global_loss(self,out,target,neg_list=[]):
+        interest_rate = self.get_interest_rate(out, target)
+
+        neg_interest_rate = []
+        for neg_out in neg_list:
+            neg_interest_rate.append(self.get_interest_rate(out, neg_out))
+        neg_interest_rate = torch.cat(neg_interest_rate, dim=0)
+        all_interest_rate = torch.cat([interest_rate, neg_interest_rate])
+
+        labels = torch.cat([torch.ones(interest_rate.shape,device=interest_rate.device), torch.zeros(neg_interest_rate.shape,device=neg_interest_rate.device)],dim=0)
+
+        logloss_global = F.binary_cross_entropy(all_interest_rate, labels)
+
+        return logloss_global

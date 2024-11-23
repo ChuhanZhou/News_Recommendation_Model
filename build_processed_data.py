@@ -1,8 +1,9 @@
 from configs.run_config import config as run_config
-from tool import process_data
+from tool import process_data_v2
 
 
 if __name__ == '__main__':
-    process_data.process_dataset(run_config['train_dataset'], 0,50000*2)
-    #process_data.process_dataset(run_config['validation_dataset'], 1,50000)
-    #process_data.load_dataset(run_config['test_dataset'], 2)
+    process_data_v2.process_dataset("C:/datasets/read/ebnerd_demo", 0)
+    process_data_v2.process_dataset("C:/datasets/read/ebnerd_demo", 1)
+    process_data_v2.process_dataset("C:/datasets/read/ebnerd_small", 0)
+    process_data_v2.process_dataset("C:/datasets/read/ebnerd_small", 1)
