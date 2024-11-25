@@ -29,100 +29,70 @@ def load_word2vec_data(file_path=run_config['word2vec_data']):
     article_id_data = list(word2vec_data["article_id"])
     document_vector_data = list(word2vec_data["document_vector"])
 
-    pca = PCA(n_components=model_config['news_pca_vector'])
+    pca = PCA(n_components=model_config['text_pca_vector'])
     pca_vector_data = pca.fit_transform(np.array(document_vector_data))
 
-    article_vector_data = {}
-    for i, article_id in enumerate(article_id_data):
-        article_vector = pca_vector_data[i, :]
-        article_vector_data[article_id] = article_vector
-    return article_vector_data
+    text_vector_data = {}
+    for i,article_id in enumerate(article_id_data):
+        text_vector = pca_vector_data[i,:]
+        text_vector_data[int(article_id)] = text_vector
+    return text_vector_data
 
-def build_full_running_data(batch_data,category_feature_data,news_info_data):
-    [history_feature_list,target_news_feature,label_feature,other_inview_feature_list] = batch_data
-    #history_feature: [news_id(1),interest(2),history_timestamp(1),news_history(4)]
-    #target_news: [news_id(1),news_history(4)]
-    #label: [interest(2)]
-    category_dim = []
-    news_data_dim = []
-    news_history_dim = []
-    interest_dim = []
-    history_timestamp_dim = []
+def load_image_embeddings_data(file_path=run_config['image_embeddings_data']):
+    print("[{}] loading image embeddings dataset from {}".format(datetime.datetime.now(), file_path))
+    image_embeddings_data = pq.ParquetFile(file_path).read().to_pandas()
+    article_id_data = list(image_embeddings_data["article_id"])
+    img_vector_data = list(image_embeddings_data["image_embedding"])
 
-    target_dim_list = [[],[],[]]#[news_category,news_data,news_history]
-    neg_dim_lists = []
+    pca = PCA(n_components=model_config['img_pca_vector'])
+    pca_vector_data = pca.fit_transform(np.array(img_vector_data))
 
-    for line_i in range(label_feature.shape[0]):
-        for batch_history_feature in history_feature_list:
-            history_feature = batch_history_feature[line_i:line_i+1,:]
-            news_id = int(history_feature[0,0])
-            interest_feature = history_feature[0,1:3]
-            history_timestamp = history_feature[0,3]
-            news_history_feature = history_feature[0,4:9]
+    img_vector_data = {}
+    for i,article_id in enumerate(article_id_data):
+        img_vector = pca_vector_data[i,:]
+        img_vector_data[int(article_id)] = img_vector
+    return img_vector_data
 
-            news_category_feature = np.zeros(model_config['category_label_num'])
-            if news_id in category_feature_data:
-                news_category_feature = category_feature_data[news_id]
-            category_dim.append(torch.tensor(news_category_feature))
+def load_text_img_data(text_file_path=run_config['word2vec_data'],img_file_path=run_config['image_embeddings_data']):
+    print("[{}] loading document vector dataset from {}".format(datetime.datetime.now(), text_file_path))
+    word2vec_data = pq.ParquetFile(text_file_path).read().to_pandas()
+    text_article_id_data = list(word2vec_data["article_id"])
+    text_data = list(word2vec_data["document_vector"])
+    print("[{}] loading image embeddings dataset from {}".format(datetime.datetime.now(), img_file_path))
+    image_embeddings_data = pq.ParquetFile(img_file_path).read().to_pandas()
+    img_article_id_data = list(image_embeddings_data["article_id"])
+    img_data = list(image_embeddings_data["image_embedding"])
 
-            news_data_feature = np.zeros(len(model_config['article_type_dict'])+len(model_config['sentiment_label_dict'])+model_config['news_pca_vector'])
-            if news_id in news_info_data:
-                news_data_feature = news_info_data[news_id]
-            news_data_dim.append(torch.tensor(news_data_feature))
-            interest_dim.append(interest_feature)
-            history_timestamp_dim.append(history_timestamp)
-            news_history_dim.append(news_history_feature)
+    img_vector_data = {}
+    for i, article_id in enumerate(img_article_id_data):
+        img_vector_data[int(article_id)] = img_data[i]
 
-        target_id = int(target_news_feature[line_i,0])
-        target_history = target_news_feature[line_i,1:5]
-        target_category = category_feature_data[target_id]
-        target_data = news_info_data[target_id]
-        target_dim_list[0].append(torch.tensor(target_category))
-        target_dim_list[1].append(torch.tensor(target_data))
-        target_dim_list[2].append(target_history)
+    text_img_data = []
+    for i, article_id in enumerate(text_article_id_data):
+        text_vector = text_data[i]
+        if article_id in img_vector_data:
+            img_vector = img_vector_data[article_id]
+        else:
+            img_vector = np.zeros(img_data[0].shape)
+        text_img_data.append(np.append(text_vector,img_vector))
+    text_img_data = np.array(text_img_data)
 
-    for neg_feature in other_inview_feature_list:
-        neg_dim_list = [[], [], []]
-        for line_i in range(neg_feature.shape[0]):
-            neg_id = int(neg_feature[line_i, 0])
-            neg_history = neg_feature[line_i, 1:5]
-            if neg_id in category_feature_data:
-                neg_category = category_feature_data[neg_id]
-                neg_data = news_info_data[neg_id]
-                neg_dim_list[0].append(torch.tensor(neg_category))
-                neg_dim_list[1].append(torch.tensor(neg_data))
-                neg_dim_list[2].append(neg_history)
-            else:
-                neg_dim_list[0].append(torch.zeros(neg_dim_lists[-1][0][-1].shape))
-                neg_dim_list[1].append(torch.zeros(neg_dim_lists[-1][1][-1].shape))
-                neg_dim_list[2].append(torch.zeros(neg_dim_lists[-1][2][-1].shape))
-        neg_dim_list[0] = torch.stack(neg_dim_list[0]).float()
-        neg_dim_list[1] = torch.stack(neg_dim_list[1]).float()
-        neg_dim_list[2] = torch.stack(neg_dim_list[2]).float()
-        neg_dim_lists.append(neg_dim_list)
+    pca = PCA(n_components=model_config['pca_vector'])
+    pca_vector_data = pca.fit_transform(np.array(text_img_data))
 
-    category_dim = torch.stack(category_dim).float()
-    news_data_dim = torch.stack(news_data_dim).float()
-    news_history_dim = torch.stack(news_history_dim).float()
-    interest_dim = torch.stack(interest_dim).float()
-    history_timestamp_dim = torch.stack(history_timestamp_dim).unsqueeze(1).float()
-
-    user_dim_list = [category_dim,news_data_dim,news_history_dim,interest_dim,history_timestamp_dim]
-
-    target_dim_list[0] = torch.stack(target_dim_list[0]).float()
-    target_dim_list[1] = torch.stack(target_dim_list[1]).float()
-    target_dim_list[2] = torch.stack(target_dim_list[2]).float()
-
-    label_feature = label_feature.float()
-    return user_dim_list,target_dim_list,label_feature,neg_dim_lists
+    text_img_vector_data = {}
+    for i, article_id in enumerate(text_article_id_data):
+        text_img_vector = pca_vector_data[i, :]
+        text_img_vector_data[int(article_id)] = text_img_vector
+    return text_img_vector_data
 
 def load_processed_dataset(head_file_path,load_data_number=-1):
-    [subvolume_num, total_data_number, category_feature_data, news_info_data] = import_processed_data(head_file_path)
-    if load_data_number<0:
+    [subvolume_num, total_data_number,max_user_id] = import_processed_data(head_file_path)
+    if load_data_number < 0:
         load_data_number = total_data_number
     else:
-        load_data_number = min(total_data_number,load_data_number)
-    print("[{}] start loading {} processed data from {}".format(datetime.datetime.now(),load_data_number,head_file_path))
+        load_data_number = min(total_data_number, load_data_number)
+    print("[{}] start loading {} processed data from {}".format(datetime.datetime.now(), load_data_number,head_file_path))
     time.sleep(0.001)
     processed_data = []
     progress_bar = tqdm(total=load_data_number)
@@ -136,200 +106,114 @@ def load_processed_dataset(head_file_path,load_data_number=-1):
             if len(processed_data) >= load_data_number:
                 break
     progress_bar.close()
-    return processed_data,category_feature_data,news_info_data
+    return processed_data,max_user_id
 
-def process_dataset(folder_path,type_i=2,subvolume_item_num=30000,mode=-1):
-    if mode<0:
-        mode = type_i
+def process_dataset(folder_path,type_i=2,subvolume_item_num=30000,for_batch=True):
     type_list = ["train","validation","test"]
-    path = "{}/{}".format(folder_path,type_list[type_i])
-    print("[{}] loading {} dataset from {}".format(datetime.datetime.now(),type_list[mode],path))
+    save_file_path = "{}{}_{}".format(run_config['processed_data_path'],folder_path.split("/")[-1],type_list[type_i])
+    if for_batch:
+        save_file_path = "{}_batch".format(save_file_path)
 
-    articles_data = pq.ParquetFile("{}/articles.parquet".format(folder_path)).read().to_pandas()
-    history_data = pq.ParquetFile("{}/history.parquet".format(path)).read().to_pandas()
-    behaviors_data = pq.ParquetFile("{}/behaviors.parquet".format(path)).read().to_pandas()
+    path = "{}/{}".format(folder_path,type_list[type_i])
+    print("[{}] loading dataset from {}".format(datetime.datetime.now(),path))
+
+    articles_dataset = pq.ParquetFile("{}/articles.parquet".format(folder_path)).read().to_pandas()
+    history_dataset = pq.ParquetFile("{}/history.parquet".format(path)).read().to_pandas()
+    behaviors_dataset = pq.ParquetFile("{}/behaviors.parquet".format(path)).read().to_pandas()
 
     # save memory
-    article_data = process_articles_data(articles_data)
-    articles_data = None
+    article_data = process_articles_data(articles_dataset)
     print("[{}] articles data processing finished".format(datetime.datetime.now()))
-    user_history_data = process_history_data(history_data)
-    history_data = None
+    user_history_data = process_history_data(history_dataset)
     print("[{}] history data processing finished".format(datetime.datetime.now()))
-    train_part_data, test_part_data, validation_part_data,process_num = process_behaviors_data(behaviors_data, mode)
-    behaviors_data = None
+    behavior_data = process_behaviors_data(behaviors_dataset, type_i==2)
     print("[{}] behaviors data processing finished".format(datetime.datetime.now()))
 
-    print("[{}] start building {} data".format(datetime.datetime.now(),type_list[mode]))
+    print("[{}] start building processed data".format(datetime.datetime.now()))
     processed_data = []
-    category_feature_data = {}
-    news_info_data = {}
 
     head_build_task = None
     subvolume_path_list = []
     subvolume_build_task = None
 
     time.sleep(0.001)
-    progress_bar = tqdm(total=process_num)
-    data_augmentation_n = 1
-    if mode == 0:
-        head_file_path = run_config['train_data_processed']
+    progress_bar = tqdm(total=len(behavior_data))
+    max_user_id = 0
 
-        for user_i,user_id in enumerate(train_part_data.keys()):
-            user_behavior_list = train_part_data[user_id]
-            for behavior,other_inview_list in user_behavior_list:
-                article_id,standard_time,interest0,interest1 = behavior
-                label_feature = np.array([interest0,interest1])
+    for behavior_info in behavior_data:
+        [user_id,inview_list,target] = behavior_info
+        max_user_id = max(max_user_id,user_id)
+        user_history_list = user_history_data[user_id][0:model_config['history_max_num']]
 
-                target_category,target_info,target_history = article_data[article_id]
-                target_time_norm = normalization.datetime_norm(target_history[0],standard_time)
-                target_news_feature = np.concatenate((np.array([target_time_norm]),target_history[1:4]), axis=0).astype(float)
-                target_news_feature = np.concatenate((np.array([article_id]),target_news_feature), axis=0)
-                if article_id not in category_feature_data.keys():
-                    category_feature_data[article_id] = target_category
-                    news_info_data[article_id] = target_info
+        full_history_data_list = []
 
-                other_inview_feature_list = []
-                for other_inview_id in other_inview_list:
-                    if other_inview_id != article_id:
-                        other_inview_category, other_inview_info, other_inview_history = article_data[other_inview_id]
-                        other_inview_time_norm = normalization.datetime_norm(other_inview_history[0], standard_time)
-                        other_inview_feature = np.concatenate((np.array([other_inview_time_norm]), other_inview_history[1:4]), axis=0).astype(float)
-                        other_inview_feature = np.concatenate((np.array([other_inview_id]), other_inview_feature),axis=0)
-                        other_inview_feature_list.append(other_inview_feature)
-                        if other_inview_id not in category_feature_data.keys():
-                            category_feature_data[other_inview_id] = other_inview_category
-                            news_info_data[other_inview_id] = other_inview_info
-                        if len(other_inview_feature_list) == run_config['neg_label_max_num']:
-                            break
-
-                for i in range(max(0,run_config['neg_label_max_num']-len(other_inview_feature_list))):
-                    other_inview_feature_list.append(np.zeros(other_inview_feature_list[-1].shape))
-
-                #choose history training data
-                user_history_list = user_history_data[user_id].copy()
-                user_history_list.reverse()
-                # change user_history_list to do Data Augmentation here
-                history_choose_list = [user_history_list]
-                data_augmentation_n = len(history_choose_list)
-
-                for history_choose_area in history_choose_list:
-                    train_history_feature_list = []
-                    for history_i in range(model_config['history_max_length']):
-                        if history_i<len(history_choose_area):
-                            user_history = history_choose_area[history_i]
-                            history_time, history_news_id, history_interest0, history_interest1 = user_history
-
-                            history_time_norm = normalization.datetime_norm(history_time,standard_time)
-
-                            history_news_category, history_news_info, history_news_history = article_data[history_news_id]
-                            history_news_time_norm = normalization.datetime_norm(history_news_history[0], standard_time)
-                            history_news_feature = np.concatenate((np.array([history_news_time_norm]), history_news_history[1:4]),axis=0).astype(float)
-                            if history_news_id not in category_feature_data.keys():
-                                category_feature_data[history_news_id] = history_news_category
-                                news_info_data[history_news_id] = history_news_info
-
-                            train_history_feature = np.concatenate((np.array([history_interest0, history_interest1,history_time_norm]),history_news_feature),axis=0)
-                            train_history_feature = np.concatenate((np.array([history_news_id]), train_history_feature), axis=0)
-                            train_history_feature_list.append(train_history_feature)
-                        else:
-                            train_history_feature_list.append(np.zeros(train_history_feature_list[-1].shape))
-                    processed_data.append([train_history_feature_list,target_news_feature,label_feature,other_inview_feature_list])
-
-                    if len(processed_data) == subvolume_item_num:
-                        subvolume_path = "{}.subvolume{}".format(head_file_path,len(subvolume_path_list))
-                        next_task = Process(target=export_processed_data,args=[processed_data, subvolume_path])
-                        next_task.start()
-                        if subvolume_build_task is not None:
-                            subvolume_build_task.join()
-                            subvolume_build_task.close()
-                        subvolume_build_task = next_task
-                        subvolume_path_list.append(subvolume_path)
-                        processed_data = []
-                        if head_build_task is not None:
-                            head_build_task.join()
-                            head_build_task.close()
-                        head_build_task = Process(target=export_processed_data, args=[[len(subvolume_path_list),len(subvolume_path_list)*subvolume_item_num,category_feature_data,news_info_data], head_file_path])
-                        head_build_task.start()
-
-                progress_bar.update(1)
-            #save memory
-            train_part_data[user_id] = None
-            user_history_data[user_id] = None
-    else:
-        head_file_path = run_config['validation_data_processed']
-
-        user_test_timestamp_dict = {}
-        test_i_dict = {}
-        for test_i, [user_id, standard_time, _] in enumerate(test_part_data):
-            if user_id in user_test_timestamp_dict:
-                if standard_time < user_test_timestamp_dict[user_id]:
-                    user_test_timestamp_dict[user_id] = standard_time
-                    test_i_dict[user_id] = test_i
+        for h_i in range(model_config['history_max_num']):
+            if h_i < len(user_history_list):
+                [article_id, read_time, scroll_percentage] = user_history_list[h_i]
+                [text_img_vector_np, category, subcategory_np, sentiment_np, article_type_i] = article_data[article_id]
+                history_np = np.concatenate((text_img_vector_np,np.array([category]),subcategory_np,sentiment_np,np.array([article_type_i,read_time,scroll_percentage])),axis=0)
+                full_history_data_list.append(history_np)
             else:
-                user_test_timestamp_dict[user_id] = standard_time
-                test_i_dict[user_id] = test_i
-        test_i_list = list(test_i_dict.values())
+                if for_batch:
+                    full_history_data_list.append(np.zeros(full_history_data_list[-1].shape))
+                else:
+                    break
 
-        for test_i,[user_id, standard_time, inview_list] in enumerate(test_part_data):
-            if True:
-                test_history_feature_list = []
-                user_history_list = user_history_data[user_id].copy()
-                user_history_list.reverse()
-                for history_i in range(model_config['history_max_length']):
-                    if history_i < len(user_history_list):
-                        user_history = user_history_list[history_i]
-                        history_time, history_news_id, history_interest0, history_interest1 = user_history
+        full_inview_data_list = []
+        label_true_list = []
+        label_id_list = []
+        for inview_id in inview_list:
+            if for_batch and len(label_true_list) == model_config['inview_max_num']-1 and sum(label_true_list) == 0:
+                if inview_id == target:
+                    label_true_list.append(1)
+                    label_id_list.append(inview_id)
+                    [text_img_vector_np, category, subcategory_np, sentiment_np, article_type_i] = article_data[inview_id]
+                    inview_np = np.concatenate((text_img_vector_np, np.array([category]), subcategory_np, sentiment_np,np.array([article_type_i])), axis=0)
+                    full_inview_data_list.append(inview_np)
+            else:
+                if inview_id == target:
+                    label_true_list.append(1)
+                else:
+                    label_true_list.append(0)
+                label_id_list.append(inview_id)
 
-                        history_time_norm = normalization.datetime_norm(history_time, standard_time)
+                [text_img_vector_np, category, subcategory_np, sentiment_np, article_type_i] = article_data[inview_id]
+                inview_np = np.concatenate((text_img_vector_np,np.array([category]),subcategory_np,sentiment_np,np.array([article_type_i])),axis=0)
+                full_inview_data_list.append(inview_np)
 
-                        history_news_category, history_news_info, history_news_history = article_data[history_news_id]
-                        history_news_time_norm = normalization.datetime_norm(history_news_history[0], standard_time)
-                        history_news_feature = np.concatenate((np.array([history_news_time_norm]), history_news_history[1:4]), axis=0).astype(float)
-                        if history_news_id not in category_feature_data.keys():
-                            category_feature_data[history_news_id] = history_news_category
-                            news_info_data[history_news_id] = history_news_info
-                        test_history_feature = np.concatenate((np.array([history_interest0, history_interest1, history_time_norm]), history_news_feature),axis=0)
-                        test_history_feature = np.concatenate((np.array([history_news_id]), test_history_feature), axis=0)
-                        test_history_feature_list.append(test_history_feature)
-                    else:
-                        test_history_feature_list.append(np.zeros(test_history_feature_list[-1].shape))
+            if for_batch and len(label_true_list) >= model_config['inview_max_num']:
+                break
 
-                inview_news_feature_list = []
-                for inview_news_id in inview_list:
-                    inview_category, inview_info, inview_history = article_data[inview_news_id]
-                    inview_time_norm = normalization.datetime_norm(inview_history[0], standard_time)
-                    inview_news_feature = np.concatenate((np.array([inview_time_norm]), inview_history[1:4]),axis=0).astype(float)
-                    inview_news_feature = np.concatenate((np.array([inview_news_id]), inview_news_feature), axis=0)
-                    inview_news_feature_list.append(inview_news_feature)
-                    if inview_news_id not in category_feature_data.keys():
-                        category_feature_data[inview_news_id] = inview_category
-                        news_info_data[inview_news_id] = inview_info
+        if for_batch:
+            for i in range(model_config['inview_max_num']-len(label_true_list)):
+                label_true_list.append(0)
+                label_id_list.append(-1)
+                full_inview_data_list.append(np.zeros(full_inview_data_list[-1].shape))
 
-                part_processed_data = [test_history_feature_list, inview_news_feature_list]
+        full_history_data_list = np.array(full_history_data_list)
+        full_inview_data_list = np.array(full_inview_data_list)
+        label_true_list = np.array(label_true_list)
+        label_id_list = np.array(label_id_list)
 
-                if mode == 1:
-                    label_id = int(validation_part_data[test_i][0])
-                    part_processed_data.append(label_id)
+        processed_data.append([user_id,full_history_data_list,full_inview_data_list,label_true_list,label_id_list])
 
-                processed_data.append(part_processed_data)
+        if len(processed_data) == subvolume_item_num:
+            subvolume_path = "{}.subvolume{}".format(save_file_path, len(subvolume_path_list))
+            if subvolume_build_task is not None:
+                subvolume_build_task.join()
+                subvolume_build_task.close()
+            subvolume_build_task = Process(target=export_processed_data, args=[processed_data, subvolume_path])
+            subvolume_build_task.start()
+            subvolume_path_list.append(subvolume_path)
+            processed_data = []
+            if head_build_task is not None:
+                head_build_task.join()
+                head_build_task.close()
+            head_build_task = Process(target=export_processed_data, args=[[len(subvolume_path_list), len(subvolume_path_list) * subvolume_item_num, max_user_id], save_file_path])
+            head_build_task.start()
 
-                if len(processed_data) == subvolume_item_num:
-                    subvolume_path = "{}.subvolume{}".format(head_file_path, len(subvolume_path_list))
-                    next_task = Process(target=export_processed_data, args=[processed_data, subvolume_path])
-                    next_task.start()
-                    if subvolume_build_task is not None:
-                        subvolume_build_task.join()
-                        subvolume_build_task.close()
-                    subvolume_build_task = next_task
-                    subvolume_path_list.append(subvolume_path)
-                    processed_data = []
-                    if head_build_task is not None:
-                        head_build_task.join()
-                        head_build_task.close()
-                    head_build_task = Process(target=export_processed_data, args=[[len(subvolume_path_list), len(subvolume_path_list) * subvolume_item_num, category_feature_data,news_info_data], head_file_path])
-                    head_build_task.start()
-            progress_bar.update(1)
+        progress_bar.update(1)
+    progress_bar.close()
 
     if head_build_task is not None:
         head_build_task.join()
@@ -338,84 +222,33 @@ def process_dataset(folder_path,type_i=2,subvolume_item_num=30000,mode=-1):
         subvolume_build_task.join()
         subvolume_build_task.close()
 
-    subvolume_path = "{}.subvolume{}".format(head_file_path, len(subvolume_path_list))
-    export_processed_data(processed_data,subvolume_path)
+    subvolume_path = "{}.subvolume{}".format(save_file_path, len(subvolume_path_list))
+    export_processed_data(processed_data, subvolume_path)
     subvolume_path_list.append(subvolume_path)
-    export_processed_data([len(subvolume_path_list),process_num*data_augmentation_n,category_feature_data,news_info_data], head_file_path)
-    progress_bar.close()
-    return head_file_path
+    export_processed_data([len(subvolume_path_list), len(behavior_data),max_user_id],save_file_path)
+    return save_file_path
 
-def process_behaviors_data(data,type_i=2):
+def process_behaviors_data(data,is_test=False):
     user_id_data = list(data["user_id"])
-    impression_time_data = list(data["impression_time"])
+    #impression_time_data = list(data["impression_time"])
     article_ids_inview_data = list(data["article_ids_inview"])
 
-    train_data = {}
-    test_data = []
-    validation_data = []
-    total_num = 0
+    behavior_data = []
 
-    if type_i != 2:
+    if not is_test:
         next_article_id_data = list(data["article_ids_clicked"])
-        next_read_time_data = list(data["next_read_time"])
-        next_scroll_percentage_data = list(data["next_scroll_percentage"])
-
-        article_id_data = list(data["article_id"])
-        read_time_data = list(data["read_time"])
-        scroll_percentage_data = list(data["scroll_percentage"])
 
     for i,user_id in enumerate(user_id_data):
-        impression_time = np.datetime64(impression_time_data[i])
         inview_list = list(article_ids_inview_data[i])
-
-        if type_i != 2:
-            if user_id not in train_data.keys():
-                train_data[user_id] = []
-
-            article_id = article_id_data[i]
-            #read_time = read_time_data[i]
-            #scroll_percentage = scroll_percentage_data[i]
-            #if not math.isnan(article_id) and not math.isnan(read_time) and not math.isnan(scroll_percentage):
-            #    article_id = int(article_id)
-            #    user_behavior_np = np.array([
-            #        article_id,
-            #        impression_time,
-            #        normalization.read_time_norm(read_time),
-            #        scroll_percentage / 100])
-            #    train_data[user_id].append(user_behavior_np)
-            #    total_num += 1
-
-            if math.isnan(article_id):#only front page
-                article_id_list = next_article_id_data[i]
-                read_time = next_read_time_data[i]
-                scroll_percentage = next_scroll_percentage_data[i]
-
-                validation_data.append(article_id_list)
-
-                if len(article_id_list)==1 and not math.isnan(read_time) and not math.isnan(scroll_percentage):
-                    article_id = int(article_id_list[0])
-
-                    user_behavior_np = np.array([
-                        article_id,
-                        impression_time,
-                        normalization.read_time_norm(read_time),
-                        scroll_percentage/100])
-
-                    other_inview_list = []
-                    for inview_id in inview_list:
-                        if inview_id != article_id:
-                            other_inview_list.append(inview_id)
-
-                    train_data[user_id].append([user_behavior_np,other_inview_list])
-                    total_num += 1
-                test_data.append([user_id, impression_time, inview_list])
+        if not is_test:
+            article_id_list = next_article_id_data[i]
+            if len(article_id_list) == 1:
+                article_id = int(article_id_list[0])
+                behavior_data.append([user_id,inview_list,article_id])
         else:
-            test_data.append([user_id,impression_time,inview_list])
+            behavior_data.append([user_id,inview_list,None])
 
-    if type_i != 0:
-        total_num = len(test_data)
-
-    return train_data,test_data,validation_data,total_num
+    return behavior_data
 
 def process_articles_data(data):
     article_id_data = list(data["article_id"])
@@ -425,15 +258,11 @@ def process_articles_data(data):
     sentiment_score_data = list(data["sentiment_score"])
     sentiment_label_data = list(data["sentiment_label"])
 
-    #article_history_data
-    published_time_data = list(data["published_time"])
-    total_inviews_data = list(data["total_inviews"])
-    total_pageviews_data = list(data["total_pageviews"])
-    total_read_time_data = list(data["total_read_time"])
+    #text_vector_data = load_word2vec_data()
+    #img_vector_data = load_image_embeddings_data()
+    text_img_vector_data = load_text_img_data()
 
-    article_vector_data = load_word2vec_data()
     article_data = {}
-
     for i, article_id in enumerate(article_id_data):
         article_id = int(article_id)
         article_type = article_type_data[i]
@@ -442,46 +271,26 @@ def process_articles_data(data):
         sentiment_score = sentiment_score_data[i]
         sentiment_label = sentiment_label_data[i]
 
-        published_time = np.datetime64(published_time_data[i])
-        total_inviews = total_inviews_data[i]
-        total_pageviews = total_pageviews_data[i]
-        total_read_time = total_read_time_data[i]
+        text_img_vector_np = text_img_vector_data[article_id]
 
-        article_type_np = np.zeros((len(model_config['article_type_dict'])))
-        article_type_np[model_config['article_type_dict'][article_type]] = 1
+        subcategory_label_list = []
+        for sc_i in range(model_config['subcategory_max_num']):
+            if sc_i < len(subcategory_list):
+                subcategory_label_list.append(subcategory_list[sc_i])
+            else:
+                subcategory_label_list.append(0)
 
-        category_np = np.zeros((model_config['category_label_num']))
-        category_np[category] = 1
-        for subcategory in subcategory_list:
-            category_np[subcategory] = 0.5
+        article_type_i = model_config['article_type_dict'][article_type]
 
         sentiment_np = np.zeros((len(model_config['sentiment_label_dict'])))
         sentiment_np[model_config['sentiment_label_dict'][sentiment_label]] = sentiment_score
 
-        article_vector_np = article_vector_data[article_id]
-
-        article_np = np.concatenate((article_type_np, sentiment_np, article_vector_np), axis=0)
-
-        #history data
-        if math.isnan(total_inviews):
-            total_inviews = 0
-        if math.isnan(total_pageviews):
-            total_pageviews = 0
-        if math.isnan(total_read_time):
-            total_read_time = 0
-
-        history_np = np.array([
-            published_time,
-            normalization.view_num_norm(total_inviews),
-            normalization.view_num_norm(total_pageviews),
-            normalization.total_read_time_norm(total_read_time)])
-
-        article_data[article_id] = [category_np,article_np,history_np]
+        article_data[article_id] = [text_img_vector_np,category,np.array(subcategory_label_list),sentiment_np,article_type_i]
     return article_data
 
 def process_history_data(data):
     user_id_data = list(data["user_id"])
-    impression_time_data = list(data["impression_time_fixed"])
+    #impression_time_data = list(data["impression_time_fixed"])
     scroll_percentage_data = list(data["scroll_percentage_fixed"])
     article_id_data = list(data["article_id_fixed"])
     read_time_data = list(data["read_time_fixed"])
@@ -490,56 +299,34 @@ def process_history_data(data):
 
     for u_i,user_id in enumerate(user_id_data):
         user_id = int(user_id)
-        impression_time_list = list(impression_time_data[u_i])
-        scroll_percentage_list = list(scroll_percentage_data[u_i])
-        article_id_list = list(article_id_data[u_i])
-        read_time_list = list(read_time_data[u_i])
+        #impression_time_list = list(impression_time_data[u_i])
+        scroll_percentage_list = list(scroll_percentage_data[u_i]).copy()
+        article_id_list = list(article_id_data[u_i]).copy()
+        read_time_list = list(read_time_data[u_i]).copy()
+
+        scroll_percentage_list.reverse()
+        article_id_list.reverse()
+        read_time_list.reverse()
 
         user_history_data[user_id] = []
-        for t_i,impression_time in enumerate(impression_time_list):
-            scroll_percentage = float(scroll_percentage_list[t_i])
-            article_id = int(article_id_list[t_i])
-            read_time = float(read_time_list[t_i])
+        for i,article_id in enumerate(article_id_list):
+            read_time = float(read_time_list[i])
+            scroll_percentage = float(scroll_percentage_list[i])
             if math.isnan(scroll_percentage):
                 scroll_percentage = 0
-            user_history_data[user_id].append([
-                impression_time,
-                article_id,
-                normalization.read_time_norm(read_time),
-                scroll_percentage/100])
-
+            user_history_data[user_id].append([article_id,read_time,scroll_percentage])
     return user_history_data
 
-def import_processed_data(path,is_zip=True):
+def import_processed_data(path):
     try:
-        if is_zip:
-            file = gzip.open(path, 'rb')
-            data = pickle.Unpickler(file).load()
-        else:
-            file = open(path,"rb")
-            data = pickle.load(file)
+        file = gzip.open(path, 'rb')
+        data = pickle.Unpickler(file).load()
         file.close()
-        #print("[{}] import data from {}".format(datetime.datetime.now(), path))
         return data
     except EOFError:
         return None
 
-def export_processed_data(data,path,is_zip=True):
-    if is_zip:
-        file = gzip.open(path, "wb")
-        #file.write(pickletools.optimize(pickle.dumps(data)))
-        file.write(pickle.dumps(data))
-    else:
-        file = open(path, "wb")
-        p = pickle.Pickler(file)
-        p.fast = True
-        p.dump(data)
+def export_processed_data(data,path):
+    file = gzip.open(path, "wb")
+    file.write(pickle.dumps(data))
     file.close()
-
-    #file = open(path,"wb")
-    #pickle.dump(data,file,protocol=pickle.HIGHEST_PROTOCOL)
-    #file.close()
-    #print("[{}] export data to {}".format(datetime.datetime.now(),path))
-
-def build_full_data():
-    print()

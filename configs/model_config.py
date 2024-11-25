@@ -20,15 +20,10 @@ config = {
     'article_video_standalone': 13,
     'article_image_gallery': 14,
     'article_timeline': 15},
-  'news_vector':300,
-  'news_pca_vector':64,
 
-  'news_feature':64,
-  'history_max_length': 200,#line
-
-  'datetime_normalize_length':365*4,#day
-  'read_time_normalize_length':45,#min set_max:30min
-
-  'total_inview_normalize_length':1e9,#
+  'pca_vector':64,
+  'subcategory_max_num':5,
+  'history_max_num': 200,
+  'inview_max_num':20,
 
 }
