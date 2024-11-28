@@ -273,8 +273,6 @@ def process_articles_data(data):
     total_pageviews_data = list(data["total_pageviews"])
     total_read_time_data = list(data["total_read_time"])
 
-    #text_vector_data = load_word2vec_data()
-    #img_vector_data = load_image_embeddings_data()
     text_img_vector_data = load_text_img_data()
 
     article_data = {}
@@ -288,11 +286,9 @@ def process_articles_data(data):
 
         published_time = [published_time_data[i].year,published_time_data[i].month,published_time_data[i].day,published_time_data[i].hour]
         global_info_list = [total_inviews_data[i],total_pageviews_data[i],total_read_time_data[i]]
-        norm_func_list = [normalization.total_view_num_norm,normalization.total_view_num_norm,normalization.total_read_time_norm]
+        norm_standard_list = [model_config['total_views_norm'],model_config['total_views_norm'],model_config['total_read_time_norm']]
         for v_i,v in enumerate(global_info_list):
-            if math.isnan(v):
-                global_info_list[v_i] = 0
-            global_info_list[v_i] = norm_func_list[v_i](global_info_list[v_i])
+            global_info_list[v_i] = normalization.value_norm(global_info_list[v_i],norm_standard_list[v_i])
         total_inviews,total_pageviews,total_read_time = global_info_list
 
         text_img_vector_np = text_img_vector_data[article_id]
@@ -321,12 +317,11 @@ def process_history_data(data):
     impression_time_data = list(data["impression_time_fixed"])
 
     user_history_data = {}
-
     for u_i,user_id in enumerate(user_id_data):
         user_id = int(user_id)
-        scroll_percentage_list = list(scroll_percentage_data[u_i]).copy()
-        article_id_list = list(article_id_data[u_i]).copy()
-        read_time_list = list(read_time_data[u_i]).copy()
+        scroll_percentage_list = list(scroll_percentage_data[u_i])
+        article_id_list = list(article_id_data[u_i])
+        read_time_list = list(read_time_data[u_i])
 
         impression_time_list = list(impression_time_data[u_i])
 
@@ -337,13 +332,15 @@ def process_history_data(data):
 
         user_history_data[user_id] = []
         for i,article_id in enumerate(article_id_list):
-            read_time = float(read_time_list[i])
-            scroll_percentage = float(scroll_percentage_list[i])
+            read_time = normalization.value_norm(float(read_time_list[i]),model_config['read_time_norm'])
+            scroll_percentage = normalization.value_norm(float(scroll_percentage_list[i]),model_config['scroll_norm'])
             impression_time = pd.to_datetime(impression_time_list[i])
             impression_time = [impression_time.year, impression_time.month, impression_time.day,impression_time.hour]
-            if math.isnan(scroll_percentage):
-                scroll_percentage = 0
+            #if math.isnan(scroll_percentage):
+            #    scroll_percentage = 0
             user_history_data[user_id].append([np.array(impression_time),article_id,read_time,scroll_percentage])
+            if (i+1)>=model_config['history_max_num']:
+                break
     return user_history_data
 
 def import_processed_data(path):

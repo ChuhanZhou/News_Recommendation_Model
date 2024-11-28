@@ -21,3 +21,9 @@ def total_view_num_norm(view_num,standard=model_config['total_views_norm']):
     if not math.isnan(view_num):
         norm = view_num / standard
     return norm
+
+def value_norm(value, standard):
+    norm = 0
+    if not math.isnan(value):
+        norm = value / standard
+    return norm

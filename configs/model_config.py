@@ -20,8 +20,12 @@ config = {
         'article_video_standalone': 13,
         'article_image_gallery': 14,
         'article_timeline': 15},
+
+    'read_time_norm':60,
+    'scroll_norm':100,
     'total_views_norm':1e7,
     'total_read_time_norm':1e9,
+
     'pca_vector':64,
     'subcategory_max_num':5,
     'history_max_num': 200,
