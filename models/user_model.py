@@ -13,7 +13,7 @@ class UserModel(nn.Module):
     def __init__(self,user_num=0):
         super().__init__()
         self.invariant_interest_model = UserInvariantInterestModel()
-        self.instant_interest_model = UserInstantInterestModel(3)
+        self.instant_interest_model = UserInstantInterestModel(8)
 
         self.bn = nn.BatchNorm1d((sum(self.invariant_interest_model.embed_setting) + model_config['pca_vector'])*2+self.instant_interest_model.output_dim)
         self.gate = MLP(self.bn.num_features, self.bn.num_features)

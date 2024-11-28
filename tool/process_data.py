@@ -288,9 +288,11 @@ def process_articles_data(data):
 
         published_time = [published_time_data[i].year,published_time_data[i].month,published_time_data[i].day,published_time_data[i].hour]
         global_info_list = [total_inviews_data[i],total_pageviews_data[i],total_read_time_data[i]]
+        norm_func_list = [normalization.total_view_num_norm,normalization.total_view_num_norm,normalization.total_read_time_norm]
         for v_i,v in enumerate(global_info_list):
             if math.isnan(v):
                 global_info_list[v_i] = 0
+            global_info_list[v_i] = norm_func_list[v_i](global_info_list[v_i])
         total_inviews,total_pageviews,total_read_time = global_info_list
 
         text_img_vector_np = text_img_vector_data[article_id]

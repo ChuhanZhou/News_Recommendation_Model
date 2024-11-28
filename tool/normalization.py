@@ -10,21 +10,14 @@ def read_time_norm(read_time):
         norm = read_time/standard
     return max(0,min(norm,1))
 
-def total_read_time_norm(total_read_time):
+def total_read_time_norm(total_read_time,standard=model_config['total_read_time_norm']):
     norm = 0
     if not math.isnan(total_read_time):
-        standard = model_config['total_inview_normalize_length']*model_config['read_time_normalize_length']*60
         norm = total_read_time/standard
-    return max(0,min(norm,1))
+    return norm
 
-def view_num_norm(view_num):
+def total_view_num_norm(view_num,standard=model_config['total_views_norm']):
     norm = 0
     if not math.isnan(view_num):
-        standard = model_config['total_inview_normalize_length']
         norm = view_num / standard
-    return max(0, min(norm, 1))
-
-def datetime_norm(datetime, standard_time,alpha=1e-6):
-    standard = model_config['datetime_normalize_length']
-    norm = (standard_time - datetime)/np.timedelta64(standard, 'D')
-    return 1-max(0, min(norm, 1-alpha))
+    return norm

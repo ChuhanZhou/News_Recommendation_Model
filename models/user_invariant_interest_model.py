@@ -25,7 +25,7 @@ class UserInvariantInterestModel(nn.Module):
         )
         self.sentiment_embedding = nn.Sequential(
             nn.Linear(len(model_config['sentiment_label_dict']), self.embed_setting[1]),
-            #nn.ReLU()
+            nn.ReLU()
         )
         self.type_embedding = nn.Sequential(
             nn.Embedding(len(model_config['article_type_dict']), self.embed_setting[2]),

@@ -14,7 +14,7 @@ class UserInstantInterestModel(nn.Module):
 
         self.out_fc = nn.Sequential(
             nn.Linear(3, output_dim),
-            #nn.ReLU()
+            nn.ReLU()
         )
 
     def forward(self,x_global):

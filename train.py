@@ -23,7 +23,7 @@ if __name__ == '__main__':
     lr = run_config['lr']
 
     training_data,max_user_id = process_data.load_processed_dataset(run_config['processed_data_path']+run_config['train_data_processed'],batch_size*1000)
-    validation_data,_ = process_data.load_processed_dataset(run_config['processed_data_path']+run_config['validation_data_processed'],)
+    validation_data,_ = process_data.load_processed_dataset(run_config['processed_data_path']+run_config['validation_data_processed'],2500)
 
     train_data_loader = torch.utils.data.DataLoader(dataset=training_data, batch_size=batch_size, shuffle=True)
     torch.manual_seed(0)
@@ -67,6 +67,10 @@ if __name__ == '__main__':
 
             total_loss += loss.item()*user_id.shape[0]
             loss_str += "{:.8f}\n".format(loss.item())
+            progress_bar.set_postfix(
+                loss="{:.4f}".format(loss.item()),
+                loss_avg="{:.4f}".format(total_loss/((i+1)*batch_size)),
+                auc_avg="{:.4f}".format(total_auc/((i+1)*batch_size)))
             progress_bar.update(1)
             #with open("./ckpt/epoch_{}.txt".format(epoch), "w", encoding="utf-8") as file:
             #    file.write(loss_str)
