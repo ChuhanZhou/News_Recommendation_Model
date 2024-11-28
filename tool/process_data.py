@@ -123,10 +123,13 @@ def process_dataset(folder_path,type_i=2,subvolume_item_num=30000,for_batch=True
 
     # save memory
     article_data = process_articles_data(articles_dataset)
+    articles_dataset = None
     print("[{}] articles data processing finished".format(datetime.datetime.now()))
     user_history_data = process_history_data(history_dataset)
+    history_dataset = None
     print("[{}] history data processing finished".format(datetime.datetime.now()))
     behavior_data = process_behaviors_data(behaviors_dataset, type_i==2)
+    behaviors_dataset = None
     print("[{}] behaviors data processing finished".format(datetime.datetime.now()))
 
     print("[{}] start building processed data".format(datetime.datetime.now()))
@@ -149,9 +152,9 @@ def process_dataset(folder_path,type_i=2,subvolume_item_num=30000,for_batch=True
 
         for h_i in range(model_config['history_max_num']):
             if h_i < len(user_history_list):
-                [article_id, read_time, scroll_percentage] = user_history_list[h_i]
-                [text_img_vector_np, category, subcategory_np, sentiment_np, article_type_i] = article_data[article_id]
-                history_np = np.concatenate((text_img_vector_np,np.array([category]),subcategory_np,sentiment_np,np.array([article_type_i,read_time,scroll_percentage])),axis=0)
+                [time_np, article_id, read_time, scroll_percentage] = user_history_list[h_i]
+                [text_img_vector_np, category, subcategory_np, sentiment_np, article_type_i,_,_,_,_] = article_data[article_id]
+                history_np = np.concatenate((time_np,text_img_vector_np,np.array([category]),subcategory_np,sentiment_np,np.array([article_type_i,read_time,scroll_percentage])),axis=0)
                 full_history_data_list.append(history_np)
             else:
                 if for_batch:
@@ -160,6 +163,7 @@ def process_dataset(folder_path,type_i=2,subvolume_item_num=30000,for_batch=True
                     break
 
         full_inview_data_list = []
+        global_inview_data_list = []
         label_true_list = []
         label_id_list = []
         for inview_id in inview_list:
@@ -167,9 +171,10 @@ def process_dataset(folder_path,type_i=2,subvolume_item_num=30000,for_batch=True
                 if inview_id == target:
                     label_true_list.append(1)
                     label_id_list.append(inview_id)
-                    [text_img_vector_np, category, subcategory_np, sentiment_np, article_type_i] = article_data[inview_id]
-                    inview_np = np.concatenate((text_img_vector_np, np.array([category]), subcategory_np, sentiment_np,np.array([article_type_i])), axis=0)
+                    [text_img_vector_np, category, subcategory_np, sentiment_np, article_type_i,time_np,total_inviews,total_pageviews,total_read_time] = article_data[inview_id]
+                    inview_np = np.concatenate((time_np,text_img_vector_np, np.array([category]), subcategory_np, sentiment_np,np.array([article_type_i])), axis=0)
                     full_inview_data_list.append(inview_np)
+                    global_inview_data_list.append(np.array([total_inviews,total_pageviews,total_read_time]))
             else:
                 if inview_id == target:
                     label_true_list.append(1)
@@ -177,9 +182,10 @@ def process_dataset(folder_path,type_i=2,subvolume_item_num=30000,for_batch=True
                     label_true_list.append(0)
                 label_id_list.append(inview_id)
 
-                [text_img_vector_np, category, subcategory_np, sentiment_np, article_type_i] = article_data[inview_id]
-                inview_np = np.concatenate((text_img_vector_np,np.array([category]),subcategory_np,sentiment_np,np.array([article_type_i])),axis=0)
+                [text_img_vector_np, category, subcategory_np, sentiment_np, article_type_i,time_np,total_inviews,total_pageviews,total_read_time] = article_data[inview_id]
+                inview_np = np.concatenate((time_np,text_img_vector_np,np.array([category]),subcategory_np,sentiment_np,np.array([article_type_i])),axis=0)
                 full_inview_data_list.append(inview_np)
+                global_inview_data_list.append(np.array([total_inviews, total_pageviews, total_read_time]))
 
             if for_batch and len(label_true_list) >= model_config['inview_max_num']:
                 break
@@ -189,13 +195,16 @@ def process_dataset(folder_path,type_i=2,subvolume_item_num=30000,for_batch=True
                 label_true_list.append(0)
                 label_id_list.append(-1)
                 full_inview_data_list.append(np.zeros(full_inview_data_list[-1].shape))
+                global_inview_data_list.append(np.zeros(global_inview_data_list[-1].shape))
 
         full_history_data_list = np.array(full_history_data_list)
         full_inview_data_list = np.array(full_inview_data_list)
+        global_inview_data_list = np.array(global_inview_data_list)
         label_true_list = np.array(label_true_list)
         label_id_list = np.array(label_id_list)
 
-        processed_data.append([user_id,full_history_data_list,full_inview_data_list,label_true_list,label_id_list])
+        processed_data.append([user_id,full_history_data_list,full_inview_data_list,global_inview_data_list,label_true_list,label_id_list])
+        progress_bar.update(1)
 
         if len(processed_data) == subvolume_item_num:
             subvolume_path = "{}.subvolume{}".format(save_file_path, len(subvolume_path_list))
@@ -212,7 +221,9 @@ def process_dataset(folder_path,type_i=2,subvolume_item_num=30000,for_batch=True
             head_build_task = Process(target=export_processed_data, args=[[len(subvolume_path_list), len(subvolume_path_list) * subvolume_item_num, max_user_id], save_file_path])
             head_build_task.start()
 
-        progress_bar.update(1)
+            if len(subvolume_path_list)==21:
+                break
+
     progress_bar.close()
 
     if head_build_task is not None:
@@ -247,7 +258,6 @@ def process_behaviors_data(data,is_test=False):
                 behavior_data.append([user_id,inview_list,article_id])
         else:
             behavior_data.append([user_id,inview_list,None])
-
     return behavior_data
 
 def process_articles_data(data):
@@ -257,6 +267,11 @@ def process_articles_data(data):
     subcategory_data = list(data["subcategory"])
     sentiment_score_data = list(data["sentiment_score"])
     sentiment_label_data = list(data["sentiment_label"])
+
+    published_time_data = list(data["published_time"])
+    total_inviews_data = list(data["total_inviews"])
+    total_pageviews_data = list(data["total_pageviews"])
+    total_read_time_data = list(data["total_read_time"])
 
     #text_vector_data = load_word2vec_data()
     #img_vector_data = load_image_embeddings_data()
@@ -270,6 +285,13 @@ def process_articles_data(data):
         subcategory_list = subcategory_data[i]
         sentiment_score = sentiment_score_data[i]
         sentiment_label = sentiment_label_data[i]
+
+        published_time = [published_time_data[i].year,published_time_data[i].month,published_time_data[i].day,published_time_data[i].hour]
+        global_info_list = [total_inviews_data[i],total_pageviews_data[i],total_read_time_data[i]]
+        for v_i,v in enumerate(global_info_list):
+            if math.isnan(v):
+                global_info_list[v_i] = 0
+        total_inviews,total_pageviews,total_read_time = global_info_list
 
         text_img_vector_np = text_img_vector_data[article_id]
 
@@ -285,36 +307,41 @@ def process_articles_data(data):
         sentiment_np = np.zeros((len(model_config['sentiment_label_dict'])))
         sentiment_np[model_config['sentiment_label_dict'][sentiment_label]] = sentiment_score
 
-        article_data[article_id] = [text_img_vector_np,category,np.array(subcategory_label_list),sentiment_np,article_type_i]
+        article_data[article_id] = [text_img_vector_np,category,np.array(subcategory_label_list),sentiment_np,article_type_i,np.array(published_time),total_inviews,total_pageviews,total_read_time]
     return article_data
 
 def process_history_data(data):
     user_id_data = list(data["user_id"])
-    #impression_time_data = list(data["impression_time_fixed"])
     scroll_percentage_data = list(data["scroll_percentage_fixed"])
     article_id_data = list(data["article_id_fixed"])
     read_time_data = list(data["read_time_fixed"])
+
+    impression_time_data = list(data["impression_time_fixed"])
 
     user_history_data = {}
 
     for u_i,user_id in enumerate(user_id_data):
         user_id = int(user_id)
-        #impression_time_list = list(impression_time_data[u_i])
         scroll_percentage_list = list(scroll_percentage_data[u_i]).copy()
         article_id_list = list(article_id_data[u_i]).copy()
         read_time_list = list(read_time_data[u_i]).copy()
 
+        impression_time_list = list(impression_time_data[u_i])
+
         scroll_percentage_list.reverse()
         article_id_list.reverse()
         read_time_list.reverse()
+        impression_time_list.reverse()
 
         user_history_data[user_id] = []
         for i,article_id in enumerate(article_id_list):
             read_time = float(read_time_list[i])
             scroll_percentage = float(scroll_percentage_list[i])
+            impression_time = pd.to_datetime(impression_time_list[i])
+            impression_time = [impression_time.year, impression_time.month, impression_time.day,impression_time.hour]
             if math.isnan(scroll_percentage):
                 scroll_percentage = 0
-            user_history_data[user_id].append([article_id,read_time,scroll_percentage])
+            user_history_data[user_id].append([np.array(impression_time),article_id,read_time,scroll_percentage])
     return user_history_data
 
 def import_processed_data(path):

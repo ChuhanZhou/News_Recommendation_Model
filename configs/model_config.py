@@ -24,6 +24,6 @@ config = {
   'pca_vector':64,
   'subcategory_max_num':5,
   'history_max_num': 200,
-  'inview_max_num':20,
+  'inview_max_num':15,#90%:20, 80%:15, 75%:13 , 70%:12
 
 }

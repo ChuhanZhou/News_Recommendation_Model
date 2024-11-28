@@ -8,10 +8,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class UserInvariantInterestModel(nn.Module):
-    def __init__(self, embed_setting=[32,16,16]):
+    def __init__(self, embed_setting=[32,16,8,8]):
         super().__init__()
         self.embed_setting = embed_setting
         self.slice_len_list = [
+            4,
             model_config['pca_vector'],
             1,
             model_config['subcategory_max_num'],
@@ -24,12 +25,24 @@ class UserInvariantInterestModel(nn.Module):
         )
         self.sentiment_embedding = nn.Sequential(
             nn.Linear(len(model_config['sentiment_label_dict']), self.embed_setting[1]),
-            nn.ReLU()
+            #nn.ReLU()
         )
         self.type_embedding = nn.Sequential(
             nn.Embedding(len(model_config['article_type_dict']), self.embed_setting[2]),
         )
-        self.w1 = nn.Linear(sum(self.embed_setting)+2,sum(self.embed_setting))
+        self.w1 = nn.Linear(sum(self.embed_setting) + 2, sum(self.embed_setting))
+        self.year_embedding = nn.Sequential(
+            nn.Embedding(3000, self.embed_setting[3]),
+        )
+        self.month_embedding = nn.Sequential(
+            nn.Embedding(12+1, self.embed_setting[3]),
+        )
+        self.day_embedding = nn.Sequential(
+            nn.Embedding(31+1, self.embed_setting[3]),
+        )
+        self.hour_embedding = nn.Sequential(
+            nn.Embedding(24, self.embed_setting[3]),
+        )
 
         self.label_attention = PointwiseAttentionExpanded(sum(self.embed_setting))
         self.text_img_attention = PointwiseAttentionExpanded(model_config['pca_vector'])
@@ -50,13 +63,20 @@ class UserInvariantInterestModel(nn.Module):
         type = self.type_embedding(type.reshape(type.numel(), 1).to(torch.int64)).reshape(type.shape[0],type.shape[1],-1)
         return torch.cat((all_category, sentiment, type), dim=2)
 
-    def forward(self,x_history, x_target):
-        [x_text_img_h, x_category_h, x_sub_category_h, x_sentiment_h, x_type_h, x_read_time_h,x_scroll_h] = self.slice_x(x_history.to(torch.float32), 7)
-        [x_text_img_t, x_category_t,x_sub_category_t,x_sentiment_t,x_type_t] = self.slice_x(x_target.to(torch.float32),5)
+    def time_embedding(self, time):
+        embedding_list = [self.year_embedding,self.month_embedding,self.day_embedding,self.hour_embedding]
+        embedded = torch.zeros(time.shape[0],time.shape[1],self.embed_setting[3],device=time.device)
+        for i,embedding_func in enumerate(embedding_list):
+            embedded += embedding_func(time[:,:,i:i+1].reshape(embedded.shape[0]*embedded.shape[1], -1).to(torch.int64)).reshape(embedded.shape[0], embedded.shape[1], -1)
+        return embedded
 
-        x_label_h = torch.cat((self.feature_embedding(x_category_h, x_sub_category_h, x_sentiment_h, x_type_h),x_read_time_h,x_scroll_h), dim=2)
+    def forward(self,x_history, x_target):
+        [x_time_h,x_text_img_h, x_category_h, x_sub_category_h, x_sentiment_h, x_type_h, x_read_time_h,x_scroll_h] = self.slice_x(x_history.to(torch.float32), 8)
+        [x_time_t,x_text_img_t, x_category_t,x_sub_category_t,x_sentiment_t,x_type_t] = self.slice_x(x_target.to(torch.float32),6)
+
+        x_label_h = torch.cat((self.feature_embedding(x_category_h, x_sub_category_h, x_sentiment_h, x_type_h),self.time_embedding(x_time_h),x_read_time_h,x_scroll_h), dim=2)
         x_label_h = self.w1(x_label_h.reshape(x_label_h.shape[0]*x_label_h.shape[1],-1)).reshape(x_label_h.shape[0],x_label_h.shape[1],-1)
-        x_label_t = self.feature_embedding(x_category_t, x_sub_category_t, x_sentiment_t, x_type_t)
+        x_label_t = torch.cat((self.feature_embedding(x_category_t, x_sub_category_t, x_sentiment_t, x_type_t),self.time_embedding(x_time_t)), dim=2)
 
         ec = torch.cat((x_label_t,x_text_img_t),dim=2)
 
