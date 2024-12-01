@@ -82,15 +82,19 @@ if __name__ == '__main__':
         model_ckpt.pop('delta')
         torch.save(model_ckpt, "{}/ckpt_{}_epoch_{}.pth".format(run_config['ckpt_save_path'],run_config['train_data_processed'].split("/")[-1].split(".")[0],epoch))
 
-        # scheduler.step()
+        #if (epoch+1)%2 == 0:
+        #    scheduler.step()
+
         progress_bar.close()
 
         avg_loss = total_loss/len(training_data)
         avg_auc = total_auc/len(training_data)
 
-        validation_result = model_validation(model,validation_data,device)
+        validation_result = model_validation([model],validation_data,device)
         validation_auc_score = validation_result[0]
         validation_tpr = validation_result[1]
         print("[{}] [epoch]:{} [avg_loss]:{:.3e} [auc_score_t]:{:.4f} [TPR_v]:{:.4f} [auc_score_v]:{:.4f}".format(datetime.datetime.now(),epoch,avg_loss,avg_auc,validation_tpr,validation_auc_score))
 
-    torch.save(model.state_dict(), "{}/ckpt_{}_final.pth".format(run_config['ckpt_save_path'],run_config['train_data_processed'].split("/")[-1].split(".")[0]))
+    model_ckpt = model.state_dict()
+    model_ckpt.pop('delta')
+    torch.save(model_ckpt, "{}/ckpt_{}_final.pth".format(run_config['ckpt_save_path'],run_config['train_data_processed'].split("/")[-1].split(".")[0]))

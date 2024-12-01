@@ -1,3 +1,5 @@
+import queue
+
 from configs.run_config import config as run_config
 from configs.model_config import config as model_config
 from tool import normalization
@@ -10,13 +12,14 @@ import datetime
 import numpy as np
 import math
 from sklearn.decomposition import PCA
-import gzip
+
+import zstandard as zstd
 import pickle
-import pickletools
+
 import os
 from tqdm import tqdm
 import time
-from multiprocessing import Manager,Process
+from multiprocessing import Manager,Process,Pool
 
 def has_file(file_path):
     if file_path == None:
@@ -87,24 +90,54 @@ def load_text_img_data(text_file_path=run_config['word2vec_data'],img_file_path=
     return text_img_vector_data
 
 def load_processed_dataset(head_file_path,load_data_number=-1):
-    [subvolume_num, total_data_number,max_user_id] = import_processed_data(head_file_path)
+    [subvolume_num, total_data_number,max_user_id,user_num] = import_processed_data(head_file_path)
     if load_data_number < 0:
         load_data_number = total_data_number
+        max_data_num = total_data_number
+        max_data_user_num = total_data_number
     else:
         load_data_number = min(total_data_number, load_data_number)
+        max_data_num = max(int(load_data_number/user_num),2)+1
+        max_data_user_num = load_data_number-(max_data_num-1)*user_num
+
     print("[{}] start loading {} processed data from {}".format(datetime.datetime.now(), load_data_number,head_file_path))
     time.sleep(0.001)
     processed_data = []
+    user_id_dict = {}
     progress_bar = tqdm(total=load_data_number)
     for i in range(subvolume_num):
         subvolume_path = "{}.subvolume{}".format(head_file_path,i)
         if has_file(subvolume_path):
             part_processed_data = import_processed_data(subvolume_path)
-            part_processed_data = part_processed_data[0:min(load_data_number-len(processed_data),len(part_processed_data))]
-            processed_data = processed_data + part_processed_data
-            progress_bar.update(len(part_processed_data))
+            if load_data_number == total_data_number:
+                part_processed_data = part_processed_data[0:min(load_data_number-len(processed_data),len(part_processed_data))]
+                processed_data = processed_data + part_processed_data
+                progress_bar.update(len(part_processed_data))
+            else:
+                for data in part_processed_data:
+                    user_id = data[0]
+                    if user_id in user_id_dict:
+                        if user_id_dict[user_id]==max_data_num-1 and max_data_user_num>0:
+                            processed_data.append(data)
+                            progress_bar.update()
+                            user_id_dict[user_id]+=1
+                            if user_id_dict[user_id] == max_data_num:
+                                max_data_user_num -= 1
+                        elif user_id_dict[user_id]<max_data_num-1:
+                            processed_data.append(data)
+                            progress_bar.update()
+                            user_id_dict[user_id]+=1
+                    else:
+                        processed_data.append(data)
+                        progress_bar.update()
+                        user_id_dict[user_id] = 1
+
+                    if len(processed_data) >= load_data_number:
+                        break
+
             if len(processed_data) >= load_data_number:
                 break
+
     progress_bar.close()
     return processed_data,max_user_id
 
@@ -125,7 +158,7 @@ def process_dataset(folder_path,type_i=2,subvolume_item_num=30000,for_batch=True
     article_data = process_articles_data(articles_dataset)
     articles_dataset = None
     print("[{}] articles data processing finished".format(datetime.datetime.now()))
-    user_history_data = process_history_data(history_dataset)
+    user_history_data = process_history_data_in_thread(history_dataset)
     history_dataset = None
     print("[{}] history data processing finished".format(datetime.datetime.now()))
     behavior_data = process_behaviors_data(behaviors_dataset, type_i==2)
@@ -142,10 +175,11 @@ def process_dataset(folder_path,type_i=2,subvolume_item_num=30000,for_batch=True
     time.sleep(0.001)
     progress_bar = tqdm(total=len(behavior_data))
     max_user_id = 0
-
+    user_id_dict = {}
     for behavior_info in behavior_data:
         [user_id,inview_list,target] = behavior_info
         max_user_id = max(max_user_id,user_id)
+        user_id_dict[user_id] = 1
         user_history_list = user_history_data[user_id][0:model_config['history_max_num']]
 
         full_history_data_list = []
@@ -214,16 +248,15 @@ def process_dataset(folder_path,type_i=2,subvolume_item_num=30000,for_batch=True
             subvolume_build_task = Process(target=export_processed_data, args=[processed_data, subvolume_path])
             subvolume_build_task.start()
             subvolume_path_list.append(subvolume_path)
-            processed_data = []
+            processed_data.clear()
             if head_build_task is not None:
                 head_build_task.join()
                 head_build_task.close()
-            head_build_task = Process(target=export_processed_data, args=[[len(subvolume_path_list), len(subvolume_path_list) * subvolume_item_num, max_user_id], save_file_path])
+            head_build_task = Process(target=export_processed_data, args=[[len(subvolume_path_list), len(subvolume_path_list) * subvolume_item_num, max_user_id,len(user_id_dict)], save_file_path])
             head_build_task.start()
 
-            if len(subvolume_path_list)==21:
-                break
-
+        if len(subvolume_path_list)>=25:
+            break
     progress_bar.close()
 
     if head_build_task is not None:
@@ -233,10 +266,11 @@ def process_dataset(folder_path,type_i=2,subvolume_item_num=30000,for_batch=True
         subvolume_build_task.join()
         subvolume_build_task.close()
 
-    subvolume_path = "{}.subvolume{}".format(save_file_path, len(subvolume_path_list))
-    export_processed_data(processed_data, subvolume_path)
-    subvolume_path_list.append(subvolume_path)
-    export_processed_data([len(subvolume_path_list), len(behavior_data),max_user_id],save_file_path)
+    if len(processed_data)>0:
+        subvolume_path = "{}.subvolume{}".format(save_file_path, len(subvolume_path_list))
+        export_processed_data(processed_data, subvolume_path)
+        subvolume_path_list.append(subvolume_path)
+        export_processed_data([len(subvolume_path_list), len(behavior_data),max_user_id,len(user_id_dict)],save_file_path)
     return save_file_path
 
 def process_behaviors_data(data,is_test=False):
@@ -308,7 +342,45 @@ def process_articles_data(data):
         article_data[article_id] = [text_img_vector_np,category,np.array(subcategory_label_list),sentiment_np,article_type_i,np.array(published_time),total_inviews,total_pageviews,total_read_time]
     return article_data
 
-def process_history_data(data):
+def process_history_data_in_thread(data,thread_num=16):
+    task_manager = Manager()
+    return_queue = task_manager.Queue(data.shape[0])
+    process_task_list = []
+
+    start_data_i = 0
+    time.sleep(0.001)
+    progress_bar = tqdm(total=thread_num, desc="start history process threads")
+    for i in range(thread_num):
+        if i + 1 != thread_num:
+            data_num = math.ceil(data.shape[0] / thread_num)
+        else:
+            data_num = data.shape[0] - start_data_i
+        process_task = Process(target=process_history_data,args=[data.iloc[start_data_i:start_data_i + data_num], return_queue])
+        process_task.start()
+        process_task_list.append(process_task)
+        start_data_i += data_num
+        progress_bar.update()
+    progress_bar.close()
+
+    time.sleep(0.001)
+    progress_bar = tqdm(total=data.shape[0], desc="process history data")
+    user_history_data = {}
+    while(len(user_history_data)!=data.shape[0]):
+        if return_queue.empty():
+            time.sleep(0.1)
+        else:
+            task_return = return_queue.get()
+            user_id, history_data = task_return
+            user_history_data[user_id] = history_data
+            progress_bar.update()
+
+    for process_task in process_task_list:
+        process_task.join()
+        process_task.close()
+
+    return user_history_data
+
+def process_history_data(data,return_queue=None):
     user_id_data = list(data["user_id"])
     scroll_percentage_data = list(data["scroll_percentage_fixed"])
     article_id_data = list(data["article_id_fixed"])
@@ -317,6 +389,7 @@ def process_history_data(data):
     impression_time_data = list(data["impression_time_fixed"])
 
     user_history_data = {}
+
     for u_i,user_id in enumerate(user_id_data):
         user_id = int(user_id)
         scroll_percentage_list = list(scroll_percentage_data[u_i])
@@ -336,23 +409,29 @@ def process_history_data(data):
             scroll_percentage = normalization.value_norm(float(scroll_percentage_list[i]),model_config['scroll_norm'])
             impression_time = pd.to_datetime(impression_time_list[i])
             impression_time = [impression_time.year, impression_time.month, impression_time.day,impression_time.hour]
-            #if math.isnan(scroll_percentage):
-            #    scroll_percentage = 0
+
             user_history_data[user_id].append([np.array(impression_time),article_id,read_time,scroll_percentage])
             if (i+1)>=model_config['history_max_num']:
                 break
+
+        scroll_percentage_data[u_i] = None
+        article_id_data[u_i] = None
+        read_time_data[u_i] = None
+        impression_time_data[u_i] = None
+
+        if return_queue is not None:
+            return_queue.put([user_id,user_history_data[user_id]])
+            user_history_data = {}
     return user_history_data
 
 def import_processed_data(path):
-    try:
-        file = gzip.open(path, 'rb')
-        data = pickle.Unpickler(file).load()
-        file.close()
-        return data
-    except EOFError:
-        return None
+    with open(path, "rb") as file:
+        decompressor = zstd.ZstdDecompressor()
+        decompressed_data = decompressor.decompress(file.read())
+        return pickle.loads(decompressed_data)
 
 def export_processed_data(data,path):
-    file = gzip.open(path, "wb")
-    file.write(pickle.dumps(data))
-    file.close()
+    with open(path, "wb") as file:
+        compressor = zstd.ZstdCompressor(level=11)
+        compressed_data = compressor.compress(pickle.dumps(data))
+        file.write(compressed_data)
