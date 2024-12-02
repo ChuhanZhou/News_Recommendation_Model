@@ -13,6 +13,7 @@ import numpy as np
 from tqdm import tqdm
 import time
 
+@torch.no_grad()
 def model_test(model_list,test_data,device=run_config['device']):
     test_data_loader = torch.utils.data.DataLoader(dataset=test_data, batch_size=1, shuffle=False)
     prediction_list = []

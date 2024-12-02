@@ -12,8 +12,8 @@ config = {
 
     'device': torch.device("cuda:0" if torch.cuda.is_available() else "cpu"),
     'lr': 1e-3,
-    'epochs': 10,
-    'batch_size': 1024,#5120
+    'epochs': 5,
+    'batch_size': 256,#5120
 
     'ckpt_save_path': "./ckpt/",
     'test_ckpt_path': "./ckpt/ckpt_ebnerd_demo_final.pth",

@@ -22,8 +22,8 @@ if __name__ == '__main__':
     batch_size = run_config['batch_size']
     lr = run_config['lr']
 
-    training_data,max_user_id = process_data.load_processed_dataset(run_config['processed_data_path']+run_config['train_data_processed'],batch_size*1000)
-    validation_data,_ = process_data.load_processed_dataset(run_config['processed_data_path']+run_config['validation_data_processed'],)
+    validation_data,_ = process_data.load_processed_dataset(run_config['processed_data_path']+run_config['validation_data_processed'], )
+    training_data, max_user_id = process_data.load_processed_dataset(run_config['processed_data_path'] + run_config['train_data_processed'], batch_size * 1000)
 
     train_data_loader = torch.utils.data.DataLoader(dataset=training_data, batch_size=batch_size, shuffle=True)
     torch.manual_seed(0)
