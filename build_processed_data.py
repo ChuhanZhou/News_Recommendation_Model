@@ -19,7 +19,7 @@ if __name__ == '__main__':
     if args.path is not None:
         process_data.process_dataset(args.path, type_i=args.type, subvolume_item_num=args.sub,batch_type=args.batch)
     else:
-        process_data.process_dataset("C:/datasets/read/ebnerd_testset", type_i=2, subvolume_item_num=40000, batch_type=2)
+        process_data.process_dataset("C:/datasets/read/ebnerd_testset", type_i=2, subvolume_item_num=20000, batch_type=2)
 
         #process_data.process_dataset("C:/datasets/read/ebnerd_demo", type_i=0, subvolume_item_num=50000, batch_type=0)
         #process_data.process_dataset("C:/datasets/read/ebnerd_demo", type_i=1, subvolume_item_num=50000, batch_type=0)

@@ -19,7 +19,8 @@ import pickle
 import os
 from tqdm import tqdm
 import time
-from multiprocessing import Manager,Process,Pool
+from multiprocessing import Manager,Process,Pool,Array
+import copy
 
 def has_file(file_path):
     if file_path == None:
@@ -172,11 +173,13 @@ def process_dataset(folder_path,type_i=2,subvolume_item_num=30000,batch_type=0):
     print("[{}] behaviors data processing finished, max inview num: {}".format(datetime.datetime.now(),max_inview_num))
 
     print("[{}] start building processed data".format(datetime.datetime.now()))
-    processed_data = []
+
+    processed_data = Manager().list()
 
     head_build_task = None
     subvolume_path_list = []
     subvolume_build_task = None
+    subvolume_task_data = None
 
     time.sleep(0.001)
     progress_bar = tqdm(total=len(behavior_data))
@@ -251,11 +254,16 @@ def process_dataset(folder_path,type_i=2,subvolume_item_num=30000,batch_type=0):
             if subvolume_build_task is not None:
                 subvolume_build_task.join()
                 subvolume_build_task.close()
-            subvolume_build_task = Process(target=export_processed_data, args=[processed_data, subvolume_path])
+            subvolume_task_data = processed_data
+            subvolume_build_task = Process(target=export_processed_data, args=[subvolume_task_data, subvolume_path,True])
             subvolume_build_task.start()
             subvolume_path_list.append(subvolume_path)
-            processed_data = []
-            export_processed_data([len(subvolume_path_list), len(subvolume_path_list) * subvolume_item_num, max_user_id,len(user_id_dict)], save_file_path)
+            processed_data = Manager().list()
+            if head_build_task is not None:
+                head_build_task.join()
+                head_build_task.close()
+            head_build_task = Process(target=export_processed_data, args=[[len(subvolume_path_list), len(subvolume_path_list) * subvolume_item_num, max_user_id,len(user_id_dict)], save_file_path])
+            head_build_task.start()
         progress_bar.update(1)
         #if len(subvolume_path_list)>=30:
         #    break
@@ -263,7 +271,7 @@ def process_dataset(folder_path,type_i=2,subvolume_item_num=30000,batch_type=0):
 
     if len(processed_data)>0:
         subvolume_path = "{}.subvolume{}".format(save_file_path, len(subvolume_path_list))
-        export_processed_data(processed_data, subvolume_path)
+        export_processed_data(processed_data, subvolume_path,True)
         subvolume_path_list.append(subvolume_path)
         export_processed_data([len(subvolume_path_list), len(behavior_data),max_user_id,len(user_id_dict)],save_file_path)
     return save_file_path
@@ -428,8 +436,11 @@ def import_processed_data(path):
         decompressed_data = decompressor.decompress(file.read())
         return pickle.loads(decompressed_data)
 
-def export_processed_data(data,path):
+def export_processed_data(data,path,need_copy=False):
+    if need_copy:
+        data = list(data)
+
     with open(path, "wb") as file:
-        compressor = zstd.ZstdCompressor(level=11)
+        compressor = zstd.ZstdCompressor(level=9)
         compressed_data = compressor.compress(pickle.dumps(data))
         file.write(compressed_data)

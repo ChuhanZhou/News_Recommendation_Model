@@ -15,6 +15,7 @@ import time
 from torch.multiprocessing import Manager,Process,Pool
 
 import argparse
+import copy
 
 def model_test_in_thread(test_data_path_list,model_list,batch_size,device,prediction_list,status):
     test_data = []
@@ -75,9 +76,14 @@ def write_submission_file(prediction_list,path=run_config['output_path'],name="p
     time.sleep(0.001)
     progress_bar = tqdm(total=len(prediction_list), desc="[{}] predict result to string".format(datetime.datetime.now()))
     bar_queue = Manager().Queue(len(prediction_list))
+    total_delay = 0
     for i in range(thread_num):
         if i + 1 != thread_num:
-            data_num = math.ceil(len(prediction_list) / thread_num)
+            total_delay = bar_queue.qsize() - total_delay
+            unit_delay = total_delay / max(1., (i + 1) * i / 2)
+            future_delay = (thread_num - i - 1) * (thread_num - i) / 2 * unit_delay
+            data_num = math.ceil((len(prediction_list) - start_data_i - future_delay) / (thread_num - i) + unit_delay * (thread_num - i - 1))
+            data_num = min(len(prediction_list) - start_data_i, data_num)
         else:
             data_num = len(prediction_list) - start_data_i
         return_queue = Manager().Queue(1)
@@ -116,7 +122,7 @@ def write_submission_file(prediction_list,path=run_config['output_path'],name="p
 
 def get_string_of_prediction(prediction_list,start,num,return_queue,bar_queue):
     submit_info = ""
-    prediction_list = prediction_list[start:start+num]
+    prediction_list = list(prediction_list[start:start+num])
     for impression_id,prediction_scores,ids in prediction_list:
         score_info = ""
         for score in prediction_scores:
