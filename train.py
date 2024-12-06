@@ -16,19 +16,33 @@ import numpy as np
 from tqdm import tqdm
 import time
 
-if __name__ == '__main__':
-    device = run_config['device']
-    epoch_num = run_config['epochs']
-    batch_size = run_config['batch_size']
-    lr = run_config['lr']
+import argparse
 
-    validation_data,_ = process_data.load_processed_dataset(run_config['processed_data_path']+run_config['validation_data_processed'], )
-    training_data, max_user_id = process_data.load_processed_dataset(run_config['processed_data_path'] + run_config['train_data_processed'], batch_size * 1000)
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description="Training model")
+    parser.add_argument('--seed', help="random seed", type=int, default=torch.seed())
+    parser.add_argument('--epoch', help="epoch number", type=int, default=run_config['epochs'])
+    parser.add_argument('--batch', help="batch size", type=int, default=run_config['batch_size'])
+    parser.add_argument('--lr', help="starting learning rate", type=float, default=run_config['lr'])
+    parser.add_argument('--total', help="total training data number", type=int, default=None)
+    args = parser.parse_args()
+    if args.total is None:
+        args.total = args.batch * 1000
+
+    device = run_config['device']
+    epoch_num = args.epoch
+    batch_size = args.batch
+    lr = args.lr
+    print(args.total)
+    training_data, max_user_id = process_data.load_processed_dataset(run_config['processed_data_path'] + run_config['train_data_processed'], args.total)
+    validation_data, _ = process_data.load_processed_dataset(run_config['processed_data_path'] + run_config['validation_data_processed'])
 
     train_data_loader = torch.utils.data.DataLoader(dataset=training_data, batch_size=batch_size, shuffle=True)
-    torch.manual_seed(0)
 
-    print("[{}] device: {}".format(datetime.datetime.now(),device))
+    seed = args.seed
+    torch.manual_seed(seed)
+
+    print("[{}] device: {} | random seed: {}".format(datetime.datetime.now(),device,seed))
     model = UserModel(max_user_id)
     model.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-5)
@@ -50,7 +64,7 @@ if __name__ == '__main__':
         auc_str = ""
 
         for i, data in enumerate(train_data_loader):
-            [user_id,x_history,x_inview,x_global,label,label_id] = data
+            [impression_id,user_id,x_history,x_inview,x_global,label,label_id,empty_num] = data
             torch.autograd.set_detect_anomaly(True)
             out = model(x_history.to(device), x_inview.to(device),x_global.to(device))
 
@@ -90,7 +104,7 @@ if __name__ == '__main__':
         avg_loss = total_loss/len(training_data)
         avg_auc = total_auc/len(training_data)
 
-        validation_result = model_validation([model],validation_data,device)
+        validation_result = model_validation([model],validation_data,device,256)
         validation_auc_score = validation_result[0]
         validation_tpr = validation_result[1]
         print("[{}] [epoch]:{} [avg_loss]:{:.3e} [auc_score_t]:{:.4f} [TPR_v]:{:.4f} [auc_score_v]:{:.4f}".format(datetime.datetime.now(),epoch,avg_loss,avg_auc,validation_tpr,validation_auc_score))

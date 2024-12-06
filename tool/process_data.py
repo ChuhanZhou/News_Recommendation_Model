@@ -89,7 +89,7 @@ def load_text_img_data(text_file_path=run_config['word2vec_data'],img_file_path=
         text_img_vector_data[int(article_id)] = text_img_vector
     return text_img_vector_data
 
-def load_processed_dataset(head_file_path,load_data_number=-1):
+def load_processed_dataset(head_file_path,load_data_number=-1,user_min_data_num=2):
     [subvolume_num, total_data_number,max_user_id,user_num] = import_processed_data(head_file_path)
     if load_data_number < 0:
         load_data_number = total_data_number
@@ -97,7 +97,7 @@ def load_processed_dataset(head_file_path,load_data_number=-1):
         max_data_user_num = total_data_number
     else:
         load_data_number = min(total_data_number, load_data_number)
-        max_data_num = max(int(load_data_number/user_num),2)+1
+        max_data_num = max(int(load_data_number/user_num),user_min_data_num)+1
         max_data_user_num = load_data_number-(max_data_num-1)*user_num
 
     print("[{}] start loading {} processed data from {}".format(datetime.datetime.now(), load_data_number,head_file_path))
@@ -115,37 +115,44 @@ def load_processed_dataset(head_file_path,load_data_number=-1):
                 progress_bar.update(len(part_processed_data))
             else:
                 for data in part_processed_data:
-                    user_id = data[0]
+                    _,user_id,_,_,_,_,_ = data
                     if user_id in user_id_dict:
-                        if user_id_dict[user_id]==max_data_num-1 and max_data_user_num>0:
+                        if len(user_id_dict[user_id])==max_data_num-1 and max_data_user_num>0:
                             processed_data.append(data)
                             progress_bar.update()
-                            user_id_dict[user_id]+=1
-                            if user_id_dict[user_id] == max_data_num:
-                                max_data_user_num -= 1
-                        elif user_id_dict[user_id]<max_data_num-1:
-                            processed_data.append(data)
-                            progress_bar.update()
-                            user_id_dict[user_id]+=1
+                            user_id_dict[user_id].append(0)
+                            max_data_user_num -= 1
+                        elif len(user_id_dict[user_id])<=max_data_num-2:
+                            user_id_dict[user_id].append(data)
+                            if len(user_id_dict[user_id]) == max_data_num-1:
+                                processed_data += user_id_dict[user_id]
+                                user_id_dict[user_id] = list(np.zeros(max_data_num-1))
+                                progress_bar.update(len(user_id_dict[user_id]))
                     else:
-                        processed_data.append(data)
-                        progress_bar.update()
-                        user_id_dict[user_id] = 1
+                        user_id_dict[user_id] = [data]
 
                     if len(processed_data) >= load_data_number:
                         break
-
             if len(processed_data) >= load_data_number:
                 break
 
+    if len(processed_data) < load_data_number:
+        for data_list in user_id_dict.values():
+            if len(data_list) < max_data_num-1:
+                processed_data+=data_list
+                progress_bar.update(len(data_list))
     progress_bar.close()
     return processed_data,max_user_id
 
-def process_dataset(folder_path,type_i=2,subvolume_item_num=30000,for_batch=True):
+def process_dataset(folder_path,type_i=2,subvolume_item_num=30000,batch_type=0):
     type_list = ["train","validation","test"]
     save_file_path = "{}{}_{}".format(run_config['processed_data_path'],folder_path.split("/")[-1],type_list[type_i])
-    if for_batch:
+    if batch_type==0:
         save_file_path = "{}_batch".format(save_file_path)
+    elif batch_type==1:
+        save_file_path = "{}_full".format(save_file_path)
+    elif batch_type==2:
+        save_file_path = "{}_full_batch".format(save_file_path)
 
     path = "{}/{}".format(folder_path,type_list[type_i])
     print("[{}] loading dataset from {}".format(datetime.datetime.now(),path))
@@ -154,16 +161,15 @@ def process_dataset(folder_path,type_i=2,subvolume_item_num=30000,for_batch=True
     history_dataset = pq.ParquetFile("{}/history.parquet".format(path)).read().to_pandas()
     behaviors_dataset = pq.ParquetFile("{}/behaviors.parquet".format(path)).read().to_pandas()
 
-    # save memory
     article_data = process_articles_data(articles_dataset)
     articles_dataset = None
     print("[{}] articles data processing finished".format(datetime.datetime.now()))
     user_history_data = process_history_data_in_thread(history_dataset)
     history_dataset = None
     print("[{}] history data processing finished".format(datetime.datetime.now()))
-    behavior_data = process_behaviors_data(behaviors_dataset, type_i==2)
+    behavior_data,max_inview_num = process_behaviors_data(behaviors_dataset)
     behaviors_dataset = None
-    print("[{}] behaviors data processing finished".format(datetime.datetime.now()))
+    print("[{}] behaviors data processing finished, max inview num: {}".format(datetime.datetime.now(),max_inview_num))
 
     print("[{}] start building processed data".format(datetime.datetime.now()))
     processed_data = []
@@ -176,95 +182,84 @@ def process_dataset(folder_path,type_i=2,subvolume_item_num=30000,for_batch=True
     progress_bar = tqdm(total=len(behavior_data))
     max_user_id = 0
     user_id_dict = {}
-    for behavior_info in behavior_data:
-        [user_id,inview_list,target] = behavior_info
+    for b_i,behavior_info in enumerate(behavior_data):
+        [impression_id,user_id,inview_list,target] = behavior_info
+        behavior_data[b_i] = None
         max_user_id = max(max_user_id,user_id)
         user_id_dict[user_id] = 1
         user_history_list = user_history_data[user_id][0:model_config['history_max_num']]
 
-        full_history_data_list = []
+        if batch_type!=1:
+            full_history_data_list = np.zeros((model_config['history_max_num'],80))
+        else:
+            full_history_data_list = np.zeros((len(user_history_list),80))
 
         for h_i in range(model_config['history_max_num']):
             if h_i < len(user_history_list):
                 [time_np, article_id, read_time, scroll_percentage] = user_history_list[h_i]
                 [text_img_vector_np, category, subcategory_np, sentiment_np, article_type_i,_,_,_,_] = article_data[article_id]
                 history_np = np.concatenate((time_np,text_img_vector_np,np.array([category]),subcategory_np,sentiment_np,np.array([article_type_i,read_time,scroll_percentage])),axis=0)
-                full_history_data_list.append(history_np)
+
+                full_history_data_list[h_i,:]=history_np
             else:
-                if for_batch:
-                    full_history_data_list.append(np.zeros(full_history_data_list[-1].shape))
-                else:
-                    break
-
-        full_inview_data_list = []
-        global_inview_data_list = []
-        label_true_list = []
-        label_id_list = []
-        for inview_id in inview_list:
-            if for_batch and len(label_true_list) == model_config['inview_max_num']-1 and sum(label_true_list) == 0:
-                if inview_id == target:
-                    label_true_list.append(1)
-                    label_id_list.append(inview_id)
-                    [text_img_vector_np, category, subcategory_np, sentiment_np, article_type_i,time_np,total_inviews,total_pageviews,total_read_time] = article_data[inview_id]
-                    inview_np = np.concatenate((time_np,text_img_vector_np, np.array([category]), subcategory_np, sentiment_np,np.array([article_type_i])), axis=0)
-                    full_inview_data_list.append(inview_np)
-                    global_inview_data_list.append(np.array([total_inviews,total_pageviews,total_read_time]))
-            else:
-                if inview_id == target:
-                    label_true_list.append(1)
-                else:
-                    label_true_list.append(0)
-                label_id_list.append(inview_id)
-
-                [text_img_vector_np, category, subcategory_np, sentiment_np, article_type_i,time_np,total_inviews,total_pageviews,total_read_time] = article_data[inview_id]
-                inview_np = np.concatenate((time_np,text_img_vector_np,np.array([category]),subcategory_np,sentiment_np,np.array([article_type_i])),axis=0)
-                full_inview_data_list.append(inview_np)
-                global_inview_data_list.append(np.array([total_inviews, total_pageviews, total_read_time]))
-
-            if for_batch and len(label_true_list) >= model_config['inview_max_num']:
                 break
 
-        if for_batch:
-            for i in range(model_config['inview_max_num']-len(label_true_list)):
-                label_true_list.append(0)
-                label_id_list.append(-1)
-                full_inview_data_list.append(np.zeros(full_inview_data_list[-1].shape))
-                global_inview_data_list.append(np.zeros(global_inview_data_list[-1].shape))
+        if batch_type==2:
+            inview_max_num = max_inview_num
+        elif batch_type==0:
+            inview_max_num = model_config['inview_max_num']
 
-        full_history_data_list = np.array(full_history_data_list)
-        full_inview_data_list = np.array(full_inview_data_list)
-        global_inview_data_list = np.array(global_inview_data_list)
-        label_true_list = np.array(label_true_list)
-        label_id_list = np.array(label_id_list)
+        if batch_type != 1:
+            full_inview_data_list = np.zeros((inview_max_num, 78))
+            global_inview_data_list = np.zeros((inview_max_num, 3))
+            label_true_list = np.zeros(inview_max_num)
+            label_id_list = np.ones(inview_max_num) * -1
+        else:
+            full_inview_data_list = np.zeros((len(inview_list), 78))
+            global_inview_data_list = np.zeros((len(inview_list), 3))
+            label_true_list = np.zeros(len(inview_list))
+            label_id_list = np.ones(len(inview_list)) * -1
 
-        processed_data.append([user_id,full_history_data_list,full_inview_data_list,global_inview_data_list,label_true_list,label_id_list])
-        progress_bar.update(1)
+        for i,inview_id in enumerate(inview_list):
+            if batch_type!=1 and len(label_true_list) == inview_max_num-1 and sum(label_true_list) == 0:
+                if inview_id == target:
+                    [text_img_vector_np, category, subcategory_np, sentiment_np, article_type_i,time_np,total_inviews,total_pageviews,total_read_time] = article_data[inview_id]
+                    inview_np = np.concatenate((time_np,text_img_vector_np, np.array([category]), subcategory_np, sentiment_np,np.array([article_type_i])), axis=0)
+
+                    label_true_list[i] = 1
+                    label_id_list[i] = inview_id
+                    full_inview_data_list[i,:] = inview_np
+                    global_inview_data_list[i,:] = np.array([total_inviews,total_pageviews,total_read_time])
+            else:
+                [text_img_vector_np, category, subcategory_np, sentiment_np, article_type_i,time_np,total_inviews,total_pageviews,total_read_time] = article_data[inview_id]
+                inview_np = np.concatenate((time_np,text_img_vector_np,np.array([category]),subcategory_np,sentiment_np,np.array([article_type_i])),axis=0)
+
+                if inview_id == target:
+                    label_true_list[i] = 1
+                label_id_list[i] = inview_id
+                full_inview_data_list[i, :] = inview_np
+                global_inview_data_list[i, :] = np.array([total_inviews, total_pageviews, total_read_time])
+
+            if batch_type!=1 and len(label_true_list) >= inview_max_num:
+                break
+
+        processed_data.append([impression_id,user_id,full_history_data_list,full_inview_data_list,global_inview_data_list,label_true_list,label_id_list,np.sum(label_id_list == -1)])
 
         if len(processed_data) == subvolume_item_num:
             subvolume_path = "{}.subvolume{}".format(save_file_path, len(subvolume_path_list))
+            #export_processed_data(processed_data, subvolume_path)
             if subvolume_build_task is not None:
                 subvolume_build_task.join()
                 subvolume_build_task.close()
             subvolume_build_task = Process(target=export_processed_data, args=[processed_data, subvolume_path])
             subvolume_build_task.start()
             subvolume_path_list.append(subvolume_path)
-            processed_data.clear()
-            if head_build_task is not None:
-                head_build_task.join()
-                head_build_task.close()
-            head_build_task = Process(target=export_processed_data, args=[[len(subvolume_path_list), len(subvolume_path_list) * subvolume_item_num, max_user_id,len(user_id_dict)], save_file_path])
-            head_build_task.start()
-
-        if len(subvolume_path_list)>=25:
-            break
+            processed_data = []
+            export_processed_data([len(subvolume_path_list), len(subvolume_path_list) * subvolume_item_num, max_user_id,len(user_id_dict)], save_file_path)
+        progress_bar.update(1)
+        #if len(subvolume_path_list)>=30:
+        #    break
     progress_bar.close()
-
-    if head_build_task is not None:
-        head_build_task.join()
-        head_build_task.close()
-    if subvolume_build_task is not None:
-        subvolume_build_task.join()
-        subvolume_build_task.close()
 
     if len(processed_data)>0:
         subvolume_path = "{}.subvolume{}".format(save_file_path, len(subvolume_path_list))
@@ -273,26 +268,33 @@ def process_dataset(folder_path,type_i=2,subvolume_item_num=30000,for_batch=True
         export_processed_data([len(subvolume_path_list), len(behavior_data),max_user_id,len(user_id_dict)],save_file_path)
     return save_file_path
 
-def process_behaviors_data(data,is_test=False):
+def process_behaviors_data(data):
+    impression_id_data = list(data["impression_id"])
     user_id_data = list(data["user_id"])
     #impression_time_data = list(data["impression_time"])
     article_ids_inview_data = list(data["article_ids_inview"])
 
     behavior_data = []
+    max_inview_num = 0
 
-    if not is_test:
+    if "article_ids_clicked" in data.keys():
         next_article_id_data = list(data["article_ids_clicked"])
+    else:
+        next_article_id_data = None
 
     for i,user_id in enumerate(user_id_data):
+        impression_id = impression_id_data[i]
         inview_list = list(article_ids_inview_data[i])
-        if not is_test:
+        if next_article_id_data is not None:
             article_id_list = next_article_id_data[i]
             if len(article_id_list) == 1:
                 article_id = int(article_id_list[0])
-                behavior_data.append([user_id,inview_list,article_id])
+                behavior_data.append([impression_id,user_id,inview_list,article_id])
+                max_inview_num = max(max_inview_num, len(inview_list))
         else:
-            behavior_data.append([user_id,inview_list,None])
-    return behavior_data
+            behavior_data.append([impression_id,user_id,inview_list,None])
+            max_inview_num = max(max_inview_num, len(inview_list))
+    return behavior_data,max_inview_num
 
 def process_articles_data(data):
     article_id_data = list(data["article_id"])
@@ -342,53 +344,50 @@ def process_articles_data(data):
         article_data[article_id] = [text_img_vector_np,category,np.array(subcategory_label_list),sentiment_np,article_type_i,np.array(published_time),total_inviews,total_pageviews,total_read_time]
     return article_data
 
-def process_history_data_in_thread(data,thread_num=16):
+def process_history_data_in_thread(data,thread_num=run_config['thread_num']):
     task_manager = Manager()
-    return_queue = task_manager.Queue(data.shape[0])
     process_task_list = []
+    user_history_data = task_manager.dict()
+    finish_queue = task_manager.Queue()
 
     start_data_i = 0
     time.sleep(0.001)
-    progress_bar = tqdm(total=thread_num, desc="start history process threads")
+    progress_bar = tqdm(total=data.shape[0], desc="process history data")
+    total_delay = 0
     for i in range(thread_num):
         if i + 1 != thread_num:
-            data_num = math.ceil(data.shape[0] / thread_num)
+            total_delay = len(user_history_data) - total_delay
+            unit_delay = total_delay/max(1.,(i+1)*i/2)
+            future_delay = (thread_num-i-1)*(thread_num-i)/2*unit_delay
+            data_num = math.ceil((data.shape[0] - start_data_i - future_delay) / (thread_num-i)+unit_delay*(thread_num-i-1))
+            data_num = min(data.shape[0] - start_data_i,data_num)
         else:
             data_num = data.shape[0] - start_data_i
-        process_task = Process(target=process_history_data,args=[data.iloc[start_data_i:start_data_i + data_num], return_queue])
+        process_task = Process(target=process_history_data,args=[data.iloc[start_data_i:start_data_i + data_num], user_history_data,finish_queue])
         process_task.start()
         process_task_list.append(process_task)
         start_data_i += data_num
-        progress_bar.update()
-    progress_bar.close()
 
-    time.sleep(0.001)
-    progress_bar = tqdm(total=data.shape[0], desc="process history data")
-    user_history_data = {}
-    while(len(user_history_data)!=data.shape[0]):
-        if return_queue.empty():
-            time.sleep(0.1)
-        else:
-            task_return = return_queue.get()
-            user_id, history_data = task_return
-            user_history_data[user_id] = history_data
-            progress_bar.update()
+    total_process = 0
+    while(total_process!=data.shape[0]):
+        time.sleep(0.2)
+        now_process = len(user_history_data)
+        progress_bar.update(now_process-total_process)
+        progress_bar.set_postfix(remaining_threads=len(process_task_list)-finish_queue.qsize())
+        total_process = now_process
 
     for process_task in process_task_list:
-        process_task.join()
-        process_task.close()
+        process_task.terminate()
 
     return user_history_data
 
-def process_history_data(data,return_queue=None):
+def process_history_data(data,user_history_data = {},finish_queue = None):
     user_id_data = list(data["user_id"])
     scroll_percentage_data = list(data["scroll_percentage_fixed"])
     article_id_data = list(data["article_id_fixed"])
     read_time_data = list(data["read_time_fixed"])
 
     impression_time_data = list(data["impression_time_fixed"])
-
-    user_history_data = {}
 
     for u_i,user_id in enumerate(user_id_data):
         user_id = int(user_id)
@@ -403,25 +402,24 @@ def process_history_data(data,return_queue=None):
         read_time_list.reverse()
         impression_time_list.reverse()
 
-        user_history_data[user_id] = []
+        history_data = []
         for i,article_id in enumerate(article_id_list):
             read_time = normalization.value_norm(float(read_time_list[i]),model_config['read_time_norm'])
             scroll_percentage = normalization.value_norm(float(scroll_percentage_list[i]),model_config['scroll_norm'])
             impression_time = pd.to_datetime(impression_time_list[i])
             impression_time = [impression_time.year, impression_time.month, impression_time.day,impression_time.hour]
 
-            user_history_data[user_id].append([np.array(impression_time),article_id,read_time,scroll_percentage])
+            history_data.append([np.array(impression_time),article_id,read_time,scroll_percentage])
             if (i+1)>=model_config['history_max_num']:
                 break
+        user_history_data[user_id] = history_data
 
         scroll_percentage_data[u_i] = None
         article_id_data[u_i] = None
         read_time_data[u_i] = None
         impression_time_data[u_i] = None
-
-        if return_queue is not None:
-            return_queue.put([user_id,user_history_data[user_id]])
-            user_history_data = {}
+    if finish_queue is not None:
+        finish_queue.put(0)
     return user_history_data
 
 def import_processed_data(path):

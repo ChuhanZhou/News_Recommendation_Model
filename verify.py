@@ -14,18 +14,20 @@ import numpy as np
 from tqdm import tqdm
 import time
 
-def model_validation(model_list,validation_data,device=run_config['device']):
+import argparse
+
+def model_validation(model_list,validation_data,device=run_config['device'],batch_size=1):
     true_list = []
     auc = 0
-    prediction_list = model_test(model_list, validation_data,device)
+    prediction_list = model_test(model_list, validation_data,device,batch_size=batch_size)
     time.sleep(0.001)
     progress_bar = tqdm(desc="[{}] validating test result".format(datetime.datetime.now()),total=len(validation_data))
     for data_i, data in enumerate(validation_data):
-        [user_id, _, _, _, label, _] = data
+        [impression_id,user_id, _, _, _, label, _, _] = data
 
         _, score,_ = prediction_list[data_i]
 
-        auc += auc_score(label,score)
+        auc += auc_score(label[0:len(score)],score)
 
         if np.argmax(score) == np.argmax(label):
             true_list.append(1)
@@ -41,16 +43,21 @@ def model_validation(model_list,validation_data,device=run_config['device']):
     return [auc,tpr]
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description="Verify model")
+    parser.add_argument('--data', help="validation dataset path",default=run_config['processed_data_path'] + run_config['validation_data_processed'])
+    parser.add_argument('--batch', help="batch size", type=int, default=64)
+    parser.add_argument('--model', help="model parameter file", default=run_config['ckpt_save_path'] + "ckpt_ebnerd_large_train_batch_epoch_{}.pth")
+    parser.add_argument('--ckpt', help="check point number", type=int, default=1)
+    args = parser.parse_args()
+
     ckpt_test_list = []
-    for i in range(0, 5):
-        ckpt_test_list.append(["./ckpt/ckpt_ebnerd_large_train_batch_epoch_{}.pth".format(i)])
-    #ckpt_test_list = [["./ckpt/ckpt_ebnerd_large_train_batch_final.pth","./ckpt/ckpt_ebnerd_large_validation_batch_final.pth"]]
+    for i in range(0, args.ckpt):
+        ckpt_test_list.append([args.model.format(i)])
+    #ckpt_test_list = [["./ckpt/ckpt_ebnerd_large_train_final.pth","./ckpt/ckpt_ebnerd_large_validation_final.pth"]]
+
+    validation_data, _ = process_data.load_processed_dataset(args.data)
+
     device = run_config['device']
-    # device = "cpu"
-
-    # validation_data = process_data.load_processed_dataset(run_config['validation_data_processed'])
-    validation_data, _ = process_data.load_processed_dataset(run_config['processed_data_path']+"ebnerd_small_validation")
-
     print("[{}] device: {}".format(datetime.datetime.now(), device))
 
     for ckpt_path_list in ckpt_test_list:
@@ -58,9 +65,8 @@ if __name__ == '__main__':
         for ckpt_path in ckpt_path_list:
             print(ckpt_path)
             model = UserModel()
-            model_ckpt = torch.load(ckpt_path, map_location=torch.device(device))
-            model.load_state_dict(model_ckpt, strict=False)
+            model.load_state_dict(torch.load(ckpt_path), strict=False)
             model.to(device)
             model_list.append(model)
-        auc, tpr = model_validation(model_list, validation_data, device)
-        print("[AUC]:{:.4f} [TPR]:{:.4f}".format(auc, tpr))
+        auc, tpr = model_validation(model_list, validation_data, device,args.batch)
+        print("[AUC]:{:.8f} [TPR]:{:.8f}".format(auc, tpr))

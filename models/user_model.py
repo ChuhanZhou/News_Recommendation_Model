@@ -22,7 +22,7 @@ class UserModel(nn.Module):
 
         self.delta = nn.Parameter(torch.zeros(user_num+1))
         self.bce_loss = nn.BCELoss()
-        self.sigmoid = nn.Sigmoid()
+        self.softmax = nn.Softmax(dim=1)
 
     def forward(self,x_history, x_target, x_global):
         eu_H,ec = self.invariant_interest_model(x_history, x_target)
@@ -35,9 +35,9 @@ class UserModel(nn.Module):
         return r
 
     def loss(self,id,out,label,alpha = 0.95):
-        log_loss = self.bce_loss(self.sigmoid(out),label.to(torch.float32))
+        log_loss = self.bce_loss(self.softmax(out),label.to(torch.float32))
 
         delta_imp = self.delta[id].unsqueeze(1).repeat(1, label.shape[1])
-        log_loss_imp = self.bce_loss(self.sigmoid(out+delta_imp),label.to(torch.float32))
+        log_loss_imp = self.bce_loss(self.softmax(out+delta_imp),label.to(torch.float32))
 
         return (1-alpha) * log_loss + alpha * log_loss_imp
