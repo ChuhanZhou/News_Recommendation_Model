@@ -221,7 +221,7 @@ def process_dataset(folder_path,type_i=2,subvolume_item_num=30000,batch_type=0):
             label_id_list = np.ones(len(inview_list)) * -1
 
         for i,inview_id in enumerate(inview_list):
-            if batch_type!=1 and len(label_true_list) == inview_max_num-1 and sum(label_true_list) == 0:
+            if batch_type!=1 and i+1 == inview_max_num-1 and sum(label_true_list) == 0:
                 if inview_id == target:
                     [text_img_vector_np, category, subcategory_np, sentiment_np, article_type_i,time_np,total_inviews,total_pageviews,total_read_time] = article_data[inview_id]
                     inview_np = np.concatenate((time_np,text_img_vector_np, np.array([category]), subcategory_np, sentiment_np,np.array([article_type_i])), axis=0)
@@ -240,7 +240,7 @@ def process_dataset(folder_path,type_i=2,subvolume_item_num=30000,batch_type=0):
                 full_inview_data_list[i, :] = inview_np
                 global_inview_data_list[i, :] = np.array([total_inviews, total_pageviews, total_read_time])
 
-            if batch_type!=1 and len(label_true_list) >= inview_max_num:
+            if batch_type!=1 and i+1 >= inview_max_num:
                 break
 
         processed_data.append([impression_id,user_id,full_history_data_list,full_inview_data_list,global_inview_data_list,label_true_list,label_id_list,np.sum(label_id_list == -1)])
