@@ -19,13 +19,13 @@ import argparse
 def model_validation(model_list,validation_data,device=run_config['device'],batch_size=1):
     true_list = []
     auc = 0
-    prediction_list = model_test(model_list, validation_data,device,batch_size=batch_size)
+    prediction_queue,id_list = model_test(model_list, validation_data,device,batch_size=batch_size)
     time.sleep(0.001)
     progress_bar = tqdm(desc="[{}] validating test result".format(datetime.datetime.now()),total=len(validation_data))
     for data_i, data in enumerate(validation_data):
         [impression_id,user_id, _, _, _, label, _, _] = data
 
-        _, score,_ = prediction_list[data_i]
+        _,_,score,_ = prediction_queue.get()
 
         auc += auc_score(label[0:len(score)],score)
 
@@ -45,9 +45,9 @@ def model_validation(model_list,validation_data,device=run_config['device'],batc
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Verify model")
     parser.add_argument('--data', help="validation dataset path",default=run_config['processed_data_path'] + run_config['validation_data_processed'])
-    parser.add_argument('--batch', help="batch size", type=int, default=64)
+    parser.add_argument('--batch', help="batch size", type=int, default=80)
     parser.add_argument('--model', help="model parameter file", default=run_config['ckpt_save_path'] + "ckpt_ebnerd_large_train_batch_epoch_{}.pth")
-    parser.add_argument('--ckpt', help="check point number", type=int, default=1)
+    parser.add_argument('--ckpt', help="check point number", type=int, default=10)
     args = parser.parse_args()
 
     ckpt_test_list = []
@@ -60,6 +60,7 @@ if __name__ == '__main__':
     device = run_config['device']
     print("[{}] device: {}".format(datetime.datetime.now(), device))
 
+    best_parameter_info = ["",0]
     for ckpt_path_list in ckpt_test_list:
         model_list = []
         for ckpt_path in ckpt_path_list:
@@ -70,3 +71,6 @@ if __name__ == '__main__':
             model_list.append(model)
         auc, tpr = model_validation(model_list, validation_data, device,args.batch)
         print("[AUC]:{:.8f} [TPR]:{:.8f}".format(auc, tpr))
+        if auc>=best_parameter_info[1]:
+            best_parameter_info = [ckpt_path_list,auc]
+    print("[{}] best auc score: {:.8f} | best parameter path: {}".format(datetime.datetime.now(),best_parameter_info[1],best_parameter_info[0]))

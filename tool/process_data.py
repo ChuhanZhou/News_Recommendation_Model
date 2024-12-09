@@ -20,7 +20,6 @@ import os
 from tqdm import tqdm
 import time
 from multiprocessing import Manager,Process,Pool,Array
-import copy
 
 def has_file(file_path):
     if file_path == None:
@@ -116,7 +115,7 @@ def load_processed_dataset(head_file_path,load_data_number=-1,user_min_data_num=
                 progress_bar.update(len(part_processed_data))
             else:
                 for data in part_processed_data:
-                    _,user_id,_,_,_,_,_ = data
+                    _,user_id,_,_,_,_,_,_ = data
                     if user_id in user_id_dict:
                         if len(user_id_dict[user_id])==max_data_num-1 and max_data_user_num>0:
                             processed_data.append(data)
@@ -176,15 +175,18 @@ def process_dataset(folder_path,type_i=2,subvolume_item_num=30000,batch_type=0):
 
     processed_data = Manager().list()
 
-    head_build_task = None
+    max_user_id = 0
+    user_id_dict = {}
+    inview_max_num = max_inview_num
+    if batch_type == 0:
+        inview_max_num = model_config['inview_max_num']
+
     subvolume_path_list = []
-    subvolume_build_task = None
-    subvolume_task_data = None
+    subvolume_build_queue = queue.Queue(2)
+    head_build_queue = queue.Queue(2)
 
     time.sleep(0.001)
     progress_bar = tqdm(total=len(behavior_data))
-    max_user_id = 0
-    user_id_dict = {}
     for b_i,behavior_info in enumerate(behavior_data):
         [impression_id,user_id,inview_list,target] = behavior_info
         behavior_data[b_i] = None
@@ -207,11 +209,6 @@ def process_dataset(folder_path,type_i=2,subvolume_item_num=30000,batch_type=0):
             else:
                 break
 
-        if batch_type==2:
-            inview_max_num = max_inview_num
-        elif batch_type==0:
-            inview_max_num = model_config['inview_max_num']
-
         if batch_type != 1:
             full_inview_data_list = np.zeros((inview_max_num, 78))
             global_inview_data_list = np.zeros((inview_max_num, 3))
@@ -223,8 +220,9 @@ def process_dataset(folder_path,type_i=2,subvolume_item_num=30000,batch_type=0):
             label_true_list = np.zeros(len(inview_list))
             label_id_list = np.ones(len(inview_list)) * -1
 
-        for i,inview_id in enumerate(inview_list):
-            if batch_type!=1 and i+1 == inview_max_num-1 and sum(label_true_list) == 0:
+        i = 0
+        for inview_id in inview_list:
+            if batch_type==0 and i == inview_max_num-1 and sum(label_true_list) == 0:
                 if inview_id == target:
                     [text_img_vector_np, category, subcategory_np, sentiment_np, article_type_i,time_np,total_inviews,total_pageviews,total_read_time] = article_data[inview_id]
                     inview_np = np.concatenate((time_np,text_img_vector_np, np.array([category]), subcategory_np, sentiment_np,np.array([article_type_i])), axis=0)
@@ -233,6 +231,7 @@ def process_dataset(folder_path,type_i=2,subvolume_item_num=30000,batch_type=0):
                     label_id_list[i] = inview_id
                     full_inview_data_list[i,:] = inview_np
                     global_inview_data_list[i,:] = np.array([total_inviews,total_pageviews,total_read_time])
+                    i+=1
             else:
                 [text_img_vector_np, category, subcategory_np, sentiment_np, article_type_i,time_np,total_inviews,total_pageviews,total_read_time] = article_data[inview_id]
                 inview_np = np.concatenate((time_np,text_img_vector_np,np.array([category]),subcategory_np,sentiment_np,np.array([article_type_i])),axis=0)
@@ -242,32 +241,45 @@ def process_dataset(folder_path,type_i=2,subvolume_item_num=30000,batch_type=0):
                 label_id_list[i] = inview_id
                 full_inview_data_list[i, :] = inview_np
                 global_inview_data_list[i, :] = np.array([total_inviews, total_pageviews, total_read_time])
+                i+=1
 
-            if batch_type!=1 and i+1 >= inview_max_num:
+            if batch_type!=1 and i >= inview_max_num:
                 break
 
         processed_data.append([impression_id,user_id,full_history_data_list,full_inview_data_list,global_inview_data_list,label_true_list,label_id_list,np.sum(label_id_list == -1)])
 
         if len(processed_data) == subvolume_item_num:
             subvolume_path = "{}.subvolume{}".format(save_file_path, len(subvolume_path_list))
-            #export_processed_data(processed_data, subvolume_path)
-            if subvolume_build_task is not None:
+            if subvolume_build_queue.full():
+                subvolume_build_task,subvolume_task_data = subvolume_build_queue.get()
                 subvolume_build_task.join()
                 subvolume_build_task.close()
-            subvolume_task_data = processed_data
-            subvolume_build_task = Process(target=export_processed_data, args=[subvolume_task_data, subvolume_path,True])
+                del subvolume_task_data
+            subvolume_build_task = Process(target=export_processed_data,args=[processed_data, subvolume_path, True])
             subvolume_build_task.start()
+            subvolume_build_queue.put([subvolume_build_task, processed_data])
             subvolume_path_list.append(subvolume_path)
             processed_data = Manager().list()
-            if head_build_task is not None:
+            if head_build_queue.full():
+                head_build_task = head_build_queue.get()
                 head_build_task.join()
                 head_build_task.close()
             head_build_task = Process(target=export_processed_data, args=[[len(subvolume_path_list), len(subvolume_path_list) * subvolume_item_num, max_user_id,len(user_id_dict)], save_file_path])
             head_build_task.start()
+            head_build_queue.put(head_build_task)
         progress_bar.update(1)
-        #if len(subvolume_path_list)>=30:
+        #if len(subvolume_path_list)>=40:
         #    break
     progress_bar.close()
+
+    while not subvolume_build_queue.empty():
+        subvolume_build_task, subvolume_task_data = subvolume_build_queue.get()
+        subvolume_build_task.join()
+        subvolume_build_task.close()
+    while not head_build_queue.empty():
+        head_build_task = head_build_queue.get()
+        head_build_task.join()
+        head_build_task.close()
 
     if len(processed_data)>0:
         subvolume_path = "{}.subvolume{}".format(save_file_path, len(subvolume_path_list))
@@ -353,10 +365,9 @@ def process_articles_data(data):
     return article_data
 
 def process_history_data_in_thread(data,thread_num=run_config['thread_num']):
-    task_manager = Manager()
     process_task_list = []
-    user_history_data = task_manager.dict()
-    finish_queue = task_manager.Queue()
+    user_history_data = Manager().dict()
+    finish_queue = Manager().Queue(thread_num)
 
     start_data_i = 0
     time.sleep(0.001)
@@ -375,13 +386,15 @@ def process_history_data_in_thread(data,thread_num=run_config['thread_num']):
         process_task.start()
         process_task_list.append(process_task)
         start_data_i += data_num
+        if start_data_i == data.shape[0]:
+            break
 
     total_process = 0
     while(total_process!=data.shape[0]):
         time.sleep(0.2)
         now_process = len(user_history_data)
         progress_bar.update(now_process-total_process)
-        progress_bar.set_postfix(remaining_threads=len(process_task_list)-finish_queue.qsize())
+        progress_bar.set_postfix(remaining_threads="{}/{}".format(len(process_task_list)-finish_queue.qsize(),len(process_task_list)))
         total_process = now_process
 
     for process_task in process_task_list:
@@ -441,6 +454,6 @@ def export_processed_data(data,path,need_copy=False):
         data = list(data)
 
     with open(path, "wb") as file:
-        compressor = zstd.ZstdCompressor(level=9)
+        compressor = zstd.ZstdCompressor(level=11)
         compressed_data = compressor.compress(pickle.dumps(data))
         file.write(compressed_data)
