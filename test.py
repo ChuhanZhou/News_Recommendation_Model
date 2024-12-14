@@ -118,8 +118,8 @@ def write_submission_file(prediction_queue,id_list,path=run_config['output_path'
 def get_string_of_prediction(prediction_queue,return_dict,finish_queue):
     finish_queue.put(0)
     while not prediction_queue.empty():
-        impression_id,user_id,prediction_scores,ids = prediction_queue.get()
         finish_queue.get(0)
+        impression_id,user_id,prediction_scores,ids = prediction_queue.get()
 
         sortrd_result = sorted(enumerate(prediction_scores), key=lambda x: x[1], reverse=True)
         rank_result = ["-1"] * len(prediction_scores)
@@ -168,7 +168,6 @@ if __name__ == '__main__':
     print("[{}] start test {} processed data from {}".format(datetime.datetime.now(), total_data_number,head_file_path))
     prediction_queue = Manager().Queue(total_data_number)
     id_list = Manager().list()
-    test_data = []
     test_data_path_list = []
     for i in range(subvolume_num):
         subvolume_path = "{}.subvolume{}".format(head_file_path, i)

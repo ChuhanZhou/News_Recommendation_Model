@@ -144,7 +144,7 @@ def load_processed_dataset(head_file_path,load_data_number=-1,user_min_data_num=
     progress_bar.close()
     return processed_data,max_user_id
 
-def process_dataset(folder_path,type_i=2,subvolume_item_num=30000,batch_type=0):
+def process_dataset(folder_path,type_i=2,subvolume_item_num=30000,batch_type=0,max_subvolume=-1):
     type_list = ["train","validation","test"]
     save_file_path = "{}{}_{}".format(run_config['processed_data_path'],folder_path.split("/")[-1],type_list[type_i])
     if batch_type==0:
@@ -188,7 +188,7 @@ def process_dataset(folder_path,type_i=2,subvolume_item_num=30000,batch_type=0):
     time.sleep(0.001)
     progress_bar = tqdm(total=len(behavior_data))
     for b_i,behavior_info in enumerate(behavior_data):
-        [impression_id,user_id,inview_list,target] = behavior_info
+        [impression_id,behavior_time,user_id,inview_list,target] = behavior_info
         behavior_data[b_i] = None
         max_user_id = max(max_user_id,user_id)
         user_id_dict[user_id] = 1
@@ -201,8 +201,9 @@ def process_dataset(folder_path,type_i=2,subvolume_item_num=30000,batch_type=0):
 
         for h_i in range(model_config['history_max_num']):
             if h_i < len(user_history_list):
-                [time_np, article_id, read_time, scroll_percentage] = user_history_list[h_i]
+                [impression_time, article_id, read_time, scroll_percentage] = user_history_list[h_i]
                 [text_img_vector_np, category, subcategory_np, sentiment_np, article_type_i,_,_,_,_] = article_data[article_id]
+                time_np = np.array(normalization.sec_norm((behavior_time - impression_time).total_seconds()))
                 history_np = np.concatenate((time_np,text_img_vector_np,np.array([category]),subcategory_np,sentiment_np,np.array([article_type_i,read_time,scroll_percentage])),axis=0)
 
                 full_history_data_list[h_i,:]=history_np
@@ -224,7 +225,8 @@ def process_dataset(folder_path,type_i=2,subvolume_item_num=30000,batch_type=0):
         for inview_id in inview_list:
             if batch_type==0 and i == inview_max_num-1 and sum(label_true_list) == 0:
                 if inview_id == target:
-                    [text_img_vector_np, category, subcategory_np, sentiment_np, article_type_i,time_np,total_inviews,total_pageviews,total_read_time] = article_data[inview_id]
+                    [text_img_vector_np, category, subcategory_np, sentiment_np, article_type_i,published_time,total_inviews,total_pageviews,total_read_time] = article_data[inview_id]
+                    time_np = np.array(normalization.sec_norm((behavior_time - published_time).total_seconds()))
                     inview_np = np.concatenate((time_np,text_img_vector_np, np.array([category]), subcategory_np, sentiment_np,np.array([article_type_i])), axis=0)
 
                     label_true_list[i] = 1
@@ -233,7 +235,8 @@ def process_dataset(folder_path,type_i=2,subvolume_item_num=30000,batch_type=0):
                     global_inview_data_list[i,:] = np.array([total_inviews,total_pageviews,total_read_time])
                     i+=1
             else:
-                [text_img_vector_np, category, subcategory_np, sentiment_np, article_type_i,time_np,total_inviews,total_pageviews,total_read_time] = article_data[inview_id]
+                [text_img_vector_np, category, subcategory_np, sentiment_np, article_type_i,published_time,total_inviews,total_pageviews,total_read_time] = article_data[inview_id]
+                time_np = np.array(normalization.sec_norm((behavior_time - published_time).total_seconds()))
                 inview_np = np.concatenate((time_np,text_img_vector_np,np.array([category]),subcategory_np,sentiment_np,np.array([article_type_i])),axis=0)
 
                 if inview_id == target:
@@ -268,8 +271,8 @@ def process_dataset(folder_path,type_i=2,subvolume_item_num=30000,batch_type=0):
             head_build_task.start()
             head_build_queue.put(head_build_task)
         progress_bar.update(1)
-        #if len(subvolume_path_list)>=40:
-        #    break
+        if max_subvolume>0 and len(subvolume_path_list)>=max_subvolume:
+            break
     progress_bar.close()
 
     while not subvolume_build_queue.empty():
@@ -291,7 +294,7 @@ def process_dataset(folder_path,type_i=2,subvolume_item_num=30000,batch_type=0):
 def process_behaviors_data(data):
     impression_id_data = list(data["impression_id"])
     user_id_data = list(data["user_id"])
-    #impression_time_data = list(data["impression_time"])
+    impression_time_data = list(data["impression_time"])
     article_ids_inview_data = list(data["article_ids_inview"])
 
     behavior_data = []
@@ -305,14 +308,15 @@ def process_behaviors_data(data):
     for i,user_id in enumerate(user_id_data):
         impression_id = impression_id_data[i]
         inview_list = list(article_ids_inview_data[i])
+        impression_time = impression_time_data[i]
         if next_article_id_data is not None:
             article_id_list = next_article_id_data[i]
             if len(article_id_list) == 1:
                 article_id = int(article_id_list[0])
-                behavior_data.append([impression_id,user_id,inview_list,article_id])
+                behavior_data.append([impression_id,impression_time,user_id,inview_list,article_id])
                 max_inview_num = max(max_inview_num, len(inview_list))
         else:
-            behavior_data.append([impression_id,user_id,inview_list,None])
+            behavior_data.append([impression_id,impression_time,user_id,inview_list,None])
             max_inview_num = max(max_inview_num, len(inview_list))
     return behavior_data,max_inview_num
 
@@ -340,7 +344,7 @@ def process_articles_data(data):
         sentiment_score = sentiment_score_data[i]
         sentiment_label = sentiment_label_data[i]
 
-        published_time = [published_time_data[i].year,published_time_data[i].month,published_time_data[i].day,published_time_data[i].hour]
+        published_time = published_time_data[i]
         global_info_list = [total_inviews_data[i],total_pageviews_data[i],total_read_time_data[i]]
         norm_standard_list = [model_config['total_views_norm'],model_config['total_views_norm'],model_config['total_read_time_norm']]
         for v_i,v in enumerate(global_info_list):
@@ -361,7 +365,7 @@ def process_articles_data(data):
         sentiment_np = np.zeros((len(model_config['sentiment_label_dict'])))
         sentiment_np[model_config['sentiment_label_dict'][sentiment_label]] = sentiment_score
 
-        article_data[article_id] = [text_img_vector_np,category,np.array(subcategory_label_list),sentiment_np,article_type_i,np.array(published_time),total_inviews,total_pageviews,total_read_time]
+        article_data[article_id] = [text_img_vector_np,category,np.array(subcategory_label_list),sentiment_np,article_type_i,published_time,total_inviews,total_pageviews,total_read_time]
     return article_data
 
 def process_history_data_in_thread(data,thread_num=run_config['thread_num']):
@@ -428,9 +432,8 @@ def process_history_data(data,user_history_data = {},finish_queue = None):
             read_time = normalization.value_norm(float(read_time_list[i]),model_config['read_time_norm'])
             scroll_percentage = normalization.value_norm(float(scroll_percentage_list[i]),model_config['scroll_norm'])
             impression_time = pd.to_datetime(impression_time_list[i])
-            impression_time = [impression_time.year, impression_time.month, impression_time.day,impression_time.hour]
 
-            history_data.append([np.array(impression_time),article_id,read_time,scroll_percentage])
+            history_data.append([impression_time,article_id,read_time,scroll_percentage])
             if (i+1)>=model_config['history_max_num']:
                 break
         user_history_data[user_id] = history_data

@@ -47,13 +47,12 @@ if __name__ == '__main__':
     parser.add_argument('--data', help="validation dataset path",default=run_config['processed_data_path'] + run_config['validation_data_processed'])
     parser.add_argument('--batch', help="batch size", type=int, default=80)
     parser.add_argument('--model', help="model parameter file", default=run_config['ckpt_save_path'] + "ckpt_ebnerd_large_train_batch_epoch_{}.pth")
-    parser.add_argument('--ckpt', help="check point number", type=int, default=10)
+    parser.add_argument('--ckpt', help="check point number", type=int, default=5)
     args = parser.parse_args()
 
     ckpt_test_list = []
     for i in range(0, args.ckpt):
         ckpt_test_list.append([args.model.format(i)])
-    #ckpt_test_list = [["./ckpt/ckpt_ebnerd_large_train_final.pth","./ckpt/ckpt_ebnerd_large_validation_final.pth"]]
 
     validation_data, _ = process_data.load_processed_dataset(args.data)
 

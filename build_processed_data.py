@@ -21,12 +21,12 @@ if __name__ == '__main__':
     else:
         process_data.process_dataset("C:/datasets/read/ebnerd_testset", type_i=2, subvolume_item_num=20000, batch_type=2)
 
-        #process_data.process_dataset("C:/datasets/read/ebnerd_demo", type_i=0, subvolume_item_num=50000, batch_type=0)
-        #process_data.process_dataset("C:/datasets/read/ebnerd_demo", type_i=1, subvolume_item_num=50000, batch_type=0)
-        #process_data.process_dataset("C:/datasets/read/ebnerd_demo", type_i=0, subvolume_item_num=50000, batch_type=2)
-        #process_data.process_dataset("C:/datasets/read/ebnerd_demo", type_i=1, subvolume_item_num=50000, batch_type=2)
-        #process_data.process_dataset("C:/datasets/read/ebnerd_small", type_i=0, subvolume_item_num=50000, batch_type=2)
-        #process_data.process_dataset("C:/datasets/read/ebnerd_small", type_i=1, subvolume_item_num=50000, batch_type=2)
+        process_data.process_dataset("C:/datasets/read/ebnerd_demo", type_i=0, subvolume_item_num=50000, batch_type=0)
+        process_data.process_dataset("C:/datasets/read/ebnerd_demo", type_i=1, subvolume_item_num=50000, batch_type=0)
+        process_data.process_dataset("C:/datasets/read/ebnerd_demo", type_i=0, subvolume_item_num=50000, batch_type=2)
+        process_data.process_dataset("C:/datasets/read/ebnerd_demo", type_i=1, subvolume_item_num=50000, batch_type=2)
+        process_data.process_dataset("C:/datasets/read/ebnerd_small", type_i=0, subvolume_item_num=50000, batch_type=2)
+        process_data.process_dataset("C:/datasets/read/ebnerd_small", type_i=1, subvolume_item_num=50000, batch_type=2)
 
-        #process_data.process_dataset("C:/datasets/read/ebnerd_large", type_i=0, subvolume_item_num=50000, batch_type=0)
-        #process_data.process_dataset("C:/datasets/read/ebnerd_large", type_i=1, subvolume_item_num=50000, batch_type=0)
+        process_data.process_dataset("C:/datasets/read/ebnerd_large", type_i=0, subvolume_item_num=50000, batch_type=0,max_subvolume=50)
+        process_data.process_dataset("C:/datasets/read/ebnerd_large", type_i=1, subvolume_item_num=50000, batch_type=0,max_subvolume=50)

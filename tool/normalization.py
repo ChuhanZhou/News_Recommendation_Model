@@ -27,3 +27,13 @@ def value_norm(value, standard):
     if not math.isnan(value):
         norm = value / standard
     return norm
+
+def sec_norm(total_sec):
+    standards=[[60*60*24*365,3000],[60*60*24*30,12],[60*60*24,30],[60*60,23]]
+    total_sec = max(0, total_sec)
+    norm = []
+    sec = total_sec
+    for standard,max_num in standards:
+        norm.append(min(int(sec/standard),max_num))
+        sec-=standard*norm[-1]
+    return norm

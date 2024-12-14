@@ -32,7 +32,7 @@ class UserInvariantInterestModel(nn.Module):
         )
         self.w1 = nn.Linear(sum(self.embed_setting) + 2, sum(self.embed_setting))
         self.year_embedding = nn.Sequential(
-            nn.Embedding(3000, self.embed_setting[3]),
+            nn.Embedding(100, self.embed_setting[3]),
         )
         self.month_embedding = nn.Sequential(
             nn.Embedding(12+1, self.embed_setting[3]),

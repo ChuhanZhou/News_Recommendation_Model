@@ -65,22 +65,10 @@ if __name__ == '__main__':
 
         for i, data in enumerate(train_data_loader):
             [impression_id,user_id,x_history,x_inview,x_global,label,label_id,empty_num] = data
-
-            min_zero_data_num = torch.min(empty_num)
-            x_history = x_history.to(device)
-            x_inview = x_inview.to(device)
-            x_global = x_global.to(device)
-            user_id = user_id.to(device)
-            label = label.to(device)
-            if min_zero_data_num > 0:
-                x_inview = x_inview[:, 0:-min_zero_data_num]
-                x_global = x_global[:, 0:-min_zero_data_num]
-                label = label[:, 0:-min_zero_data_num]
-                empty_num = empty_num - min_zero_data_num
 #
-            out = model(x_history, x_inview, x_global)
+            out = model(x_history.to(device), x_inview.to(device), x_global.to(device))
 
-            loss = model.loss(user_id, out, label)
+            loss = model.loss(user_id.to(device), out, label.to(device))
 
             loss.backward()
             optimizer.step()
